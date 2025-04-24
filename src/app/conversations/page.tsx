@@ -114,9 +114,13 @@ export default function ConversationsPage() {
       <div style={{ 
         display: 'flex', 
         height: '100vh',
-        margin: '-2rem',
         backgroundColor: '#f0f2f5',
         overflow: 'hidden',
+        width: 'auto',
+        margin: '-2rem -2rem -2rem -2rem', 
+        position: 'relative',
+        left: '0',
+        right: '0',
       }}>
         {/* Contacts list - Left side */}
         <div style={{ 
@@ -125,6 +129,7 @@ export default function ConversationsPage() {
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: 'white',
+          flexShrink: 0,
         }}>
           {/* Header with search */}
           <div style={{ 
@@ -243,10 +248,12 @@ export default function ConversationsPage() {
         
         {/* Conversation - Right side */}
         <div style={{ 
-          flex: '1 1 0%', 
+          flex: '1 1 auto', 
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: '#f0f2f5',
+          minWidth: 0,
+          maxHeight: '100%',
         }}>
           {/* Conversation header */}
           <div style={{ 
@@ -299,7 +306,7 @@ export default function ConversationsPage() {
           
           {/* Messages area */}
           <div style={{ 
-            flex: '1 1 0%', 
+            flex: '1 1 auto', 
             overflowY: 'auto',
             padding: '1rem',
             backgroundColor: '#e5ded8',
@@ -307,6 +314,7 @@ export default function ConversationsPage() {
             display: 'flex',
             flexDirection: 'column',
             gap: '0.5rem',
+            minHeight: 0,
           }}>
             {selectedConversation?.messages.map((message) => (
               <div
@@ -340,6 +348,7 @@ export default function ConversationsPage() {
             padding: '0.75rem 1rem',
             backgroundColor: 'white',
             borderTop: '1px solid #e5e7eb',
+            marginTop: 'auto',
           }}>
             <form 
               onSubmit={handleSendMessage} 

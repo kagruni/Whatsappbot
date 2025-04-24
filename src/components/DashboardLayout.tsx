@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
+import { usePathname } from 'next/navigation';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -7,6 +8,7 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [isMobile, setIsMobile] = useState(false);
+  const pathname = usePathname();
   
   useEffect(() => {
     const checkScreenSize = () => {
@@ -41,7 +43,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         transition: 'margin-left 0.3s ease'
       }}>
         <div style={{ 
-          maxWidth: '1400px', 
+          maxWidth: pathname === '/conversations' ? 'none' : '1400px',
           margin: '0 auto',
           paddingTop: isMobile ? '3.5rem' : '0'
         }}>
