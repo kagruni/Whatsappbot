@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -6,7 +6,10 @@ import {
   HiOutlineChat, 
   HiOutlineUsers, 
   HiOutlineCog, 
-  HiOutlineDocumentText 
+  HiOutlineDocumentText,
+  HiOutlineLogout,
+  HiOutlineMenuAlt2,
+  HiOutlineX
 } from 'react-icons/hi';
 
 interface NavItem {
@@ -17,6 +20,28 @@ interface NavItem {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [isMenuOpen, setIsMenuOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    // Check if we're on mobile
+    const checkIfMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+      // On larger screens, always keep sidebar open
+      if (window.innerWidth >= 768) {
+        setIsMenuOpen(true);
+      }
+    };
+
+    // Initial check
+    checkIfMobile();
+    
+    // Add resize listener
+    window.addEventListener('resize', checkIfMobile);
+    
+    // Cleanup
+    return () => window.removeEventListener('resize', checkIfMobile);
+  }, []);
   
   const navItems: NavItem[] = [
     { label: 'Dashboard', href: '/', icon: <HiOutlineHome style={{ height: '1.25rem', width: '1.25rem' }} /> },
@@ -27,79 +52,217 @@ export default function Sidebar() {
   ];
 
   return (
-    <div style={{
-      height: '100%', 
-      width: '16rem', 
-      backgroundColor: '#111827', 
-      color: 'white', 
-      padding: '1rem',
-      position: 'fixed',
-      left: 0,
-      top: 0,
-      bottom: 0,
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)'
-    }}>
-      <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>WhatsApp Bot</h1>
-        <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Management Dashboard</p>
-      </div>
-      
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-        {navItems.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0.5rem 0.75rem',
-                borderRadius: '0.375rem',
-                transition: 'background-color 150ms, color 150ms',
-                backgroundColor: isActive ? '#2563eb' : 'transparent',
-                color: isActive ? 'white' : '#d1d5db',
-                fontWeight: isActive ? 500 : 'normal',
-              }}
-            >
-              <span style={{ marginRight: '0.75rem' }}>{item.icon}</span>
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-      
-      <div style={{ 
-        position: 'absolute', 
-        bottom: '1rem', 
-        left: '1rem', 
-        right: '1rem' 
+    <>
+      {isMobile && (
+        <button 
+          onClick={() => setIsMenuOpen(!isMenuOpen)} 
+          style={{
+            position: 'fixed',
+            top: '1rem',
+            left: isMenuOpen ? '17rem' : '1rem',
+            zIndex: 30,
+            backgroundColor: '#1f2937',
+            color: 'white',
+            borderRadius: '0.5rem',
+            padding: '0.5rem',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 2px 5px rgba(0, 0, 0, 0.2)',
+            transition: 'left 0.3s ease'
+          }}
+        >
+          {isMenuOpen ? 
+            <HiOutlineX style={{ height: '1.5rem', width: '1.5rem' }} /> : 
+            <HiOutlineMenuAlt2 style={{ height: '1.5rem', width: '1.5rem' }} />
+          }
+        </button>
+      )}
+
+      <div style={{
+        height: '100%', 
+        width: '16rem', 
+        background: 'linear-gradient(to bottom, #111827, #1f2937)',
+        color: 'white', 
+        padding: '1.5rem 1rem',
+        position: 'fixed',
+        left: isMenuOpen ? 0 : '-16rem',
+        top: 0,
+        bottom: 0,
+        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+        borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+        display: 'flex',
+        flexDirection: 'column',
+        zIndex: 20,
+        transition: 'left 0.3s ease',
+        overflowY: 'auto'
       }}>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          padding: '0.5rem 0.75rem', 
-          borderRadius: '0.375rem', 
-          backgroundColor: '#1f2937' 
-        }}>
-          <div style={{ 
-            height: '2rem', 
-            width: '2rem', 
-            borderRadius: '9999px', 
-            backgroundColor: '#3b82f6', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            marginRight: '0.75rem'
+        <div style={{ marginBottom: '2.5rem' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem'
           }}>
-            <span style={{ fontWeight: 500 }}>AI</span>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.875rem', fontWeight: 500 }}>WhatsApp AI Bot</p>
-            <p style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Online</p>
+            <div style={{
+              width: '2.5rem',
+              height: '2.5rem',
+              borderRadius: '0.75rem',
+              background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 'bold',
+              fontSize: '1.25rem',
+              boxShadow: '0 0 20px rgba(59, 130, 246, 0.3)'
+            }}>
+              WA
+            </div>
+            <div>
+              <h1 style={{ 
+                fontSize: '1.5rem', 
+                fontWeight: 'bold',
+                letterSpacing: '0.025em'
+              }}>WhatsApp Bot</h1>
+              <p style={{ 
+                color: '#9ca3af', 
+                fontSize: '0.75rem',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase' 
+              }}>
+                Management
+              </p>
+            </div>
           </div>
         </div>
+        
+        <div style={{ 
+          marginTop: '1rem',
+          marginBottom: '0.5rem',
+          paddingLeft: '0.5rem',
+          fontSize: '0.75rem',
+          color: '#9ca3af',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em'
+        }}>
+          Main Menu
+        </div>
+        
+        <nav style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '0.5rem',
+          flex: '1 1 0%'
+        }}>
+          {navItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '0.5rem',
+                  transition: 'all 150ms ease',
+                  backgroundColor: isActive ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                  color: isActive ? 'white' : '#d1d5db',
+                  fontWeight: isActive ? 500 : 'normal',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}
+              >
+                {isActive && (
+                  <div style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: '4px',
+                    background: 'linear-gradient(to bottom, #3b82f6, #8b5cf6)',
+                    borderRadius: '0 4px 4px 0'
+                  }} />
+                )}
+                <span style={{ 
+                  marginRight: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  opacity: isActive ? 1 : 0.7
+                }}>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+        
+        <div style={{ 
+          marginTop: 'auto',
+          borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+          paddingTop: '1rem'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            padding: '0.75rem 1rem', 
+            borderRadius: '0.5rem', 
+            backgroundColor: 'rgba(31, 41, 55, 0.7)',
+            marginBottom: '1rem',
+            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.05)'
+          }}>
+            <div style={{ 
+              height: '2.5rem', 
+              width: '2.5rem', 
+              borderRadius: '0.5rem', 
+              background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              marginRight: '0.75rem',
+              boxShadow: '0 0 10px rgba(59, 130, 246, 0.3)'
+            }}>
+              <span style={{ fontWeight: 500 }}>AI</span>
+            </div>
+            <div>
+              <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>WhatsApp AI Bot</p>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                fontSize: '0.75rem'
+              }}>
+                <span style={{ 
+                  height: '0.5rem', 
+                  width: '0.5rem', 
+                  borderRadius: '9999px', 
+                  backgroundColor: '#10b981',
+                  marginRight: '0.25rem' 
+                }}></span>
+                <span style={{ color: '#9ca3af' }}>Online</span>
+              </div>
+            </div>
+          </div>
+          
+          <button style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            padding: '0.75rem',
+            borderRadius: '0.5rem',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            color: '#ef4444',
+            border: '1px solid rgba(239, 68, 68, 0.2)',
+            cursor: 'pointer',
+            transition: 'all 150ms ease'
+          }}>
+            <HiOutlineLogout style={{ 
+              height: '1.25rem', 
+              width: '1.25rem', 
+              marginRight: '0.5rem' 
+            }} />
+            Sign Out
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 } 

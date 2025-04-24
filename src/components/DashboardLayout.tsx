@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 
 interface DashboardLayoutProps {
@@ -6,20 +6,47 @@ interface DashboardLayoutProps {
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const [isMobile, setIsMobile] = useState(false);
+  
+  useEffect(() => {
+    const checkScreenSize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    // Initial check
+    checkScreenSize();
+
+    // Add event listener
+    window.addEventListener('resize', checkScreenSize);
+
+    // Cleanup
+    return () => window.removeEventListener('resize', checkScreenSize);
+  }, []);
+
   return (
     <div style={{ 
       display: 'flex', 
-      height: '100vh', 
-      backgroundColor: '#f9fafb'
+      minHeight: '100vh',
+      backgroundColor: '#f8fafc'
     }}>
       <Sidebar />
       <main style={{ 
         flex: '1 1 0%', 
         overflowY: 'auto', 
-        padding: '1.5rem', 
-        marginLeft: '16rem'
+        padding: '2rem',
+        marginLeft: isMobile ? '0' : '16rem',
+        backgroundImage: 'radial-gradient(circle at top right, rgba(59, 130, 246, 0.03), transparent 400px), radial-gradient(circle at bottom left, rgba(139, 92, 246, 0.03), transparent 400px)',
+        position: 'relative',
+        width: '100%',
+        transition: 'margin-left 0.3s ease'
       }}>
-        {children}
+        <div style={{ 
+          maxWidth: '1400px', 
+          margin: '0 auto',
+          paddingTop: isMobile ? '3.5rem' : '0'
+        }}>
+          {children}
+        </div>
       </main>
     </div>
   );

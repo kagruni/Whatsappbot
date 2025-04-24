@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { Card, Title, Text, Button, Badge, Select, SelectItem, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell } from '@tremor/react';
 import { HiOutlineRefresh, HiOutlineExternalLink, HiOutlineTrash, HiOutlineDocumentAdd } from 'react-icons/hi';
 
-// Mock data - in a real application, this would come from your Trello integration
+// Mock data
 const mockLeads = [
   {
     id: '1',
@@ -15,7 +15,6 @@ const mockLeads = [
     status: 'New Lead',
     source: 'WhatsApp',
     dateAdded: '2025-04-20',
-    trelloCardId: 'card123',
   },
   {
     id: '2',
@@ -25,7 +24,6 @@ const mockLeads = [
     status: 'In Progress',
     source: 'Website',
     dateAdded: '2025-04-19',
-    trelloCardId: 'card456',
   },
   {
     id: '3',
@@ -35,7 +33,6 @@ const mockLeads = [
     status: 'Contacted',
     source: 'WhatsApp',
     dateAdded: '2025-04-18',
-    trelloCardId: 'card789',
   },
   {
     id: '4',
@@ -45,7 +42,6 @@ const mockLeads = [
     status: 'Qualified',
     source: 'WhatsApp',
     dateAdded: '2025-04-15',
-    trelloCardId: 'card101',
   },
   {
     id: '5',
@@ -55,7 +51,6 @@ const mockLeads = [
     status: 'Closed',
     source: 'Referral',
     dateAdded: '2025-04-10',
-    trelloCardId: 'card112',
   },
 ];
 
@@ -88,7 +83,7 @@ export default function LeadsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold mb-2">Lead Management</h1>
         <p className="text-gray-600">
-          Manage leads synced with Trello
+          Manage your customer leads
         </p>
       </div>
 
@@ -120,7 +115,7 @@ export default function LeadsPage() {
             icon={HiOutlineRefresh}
             variant="secondary"
           >
-            Sync with Trello
+            Refresh
           </Button>
           <Button 
             icon={HiOutlineDocumentAdd}
@@ -174,7 +169,7 @@ export default function LeadsPage() {
                     <div className="flex gap-2">
                       <button 
                         className="p-1 text-gray-500 hover:text-blue-600"
-                        title="View in Trello"
+                        title="View Details"
                       >
                         <HiOutlineExternalLink className="h-5 w-5" />
                       </button>

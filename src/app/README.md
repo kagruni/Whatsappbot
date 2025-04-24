@@ -1,13 +1,13 @@
 # WhatsApp Bot Dashboard
 
-A modern frontend dashboard for managing and monitoring a WhatsApp AI chatbot with Trello integration.
+A modern frontend dashboard for managing and monitoring a WhatsApp AI chatbot.
 
 ## Features
 
 - **Dashboard Overview**: View key metrics and performance indicators
 - **Conversation Management**: Monitor and manage WhatsApp conversations
-- **Lead Management**: Track and manage leads with Trello integration
-- **Settings Configuration**: Configure WhatsApp, OpenAI, and Trello integrations
+- **Lead Management**: Track and manage leads
+- **Settings Configuration**: Configure WhatsApp and OpenAI integrations
 - **API Documentation**: Reference for developers
 
 ## Tech Stack

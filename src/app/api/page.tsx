@@ -118,7 +118,7 @@ export default function ApiPage() {
               <div className="space-y-4">
                 <div>
                   <h3 className="font-medium">POST /api/leads</h3>
-                  <p className="text-gray-600 text-sm">Create a new lead in the system and Trello</p>
+                  <p className="text-gray-600 text-sm">Create a new lead in the system</p>
                 </div>
                 
                 <div>
@@ -146,8 +146,7 @@ export default function ApiPage() {
     "email": "john.doe@example.com",
     "status": "New Lead",
     "source": "WhatsApp",
-    "dateAdded": "2025-04-24T17:35:22Z",
-    "trelloCardId": "card_abc123"
+    "dateAdded": "2025-04-24T17:35:22Z"
   }
 }`}
                   </pre>

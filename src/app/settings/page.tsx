@@ -23,10 +23,6 @@ export default function SettingsPage() {
 4. Understand and respond to specific commands like 'help', 'products', or 'contact'.
 Always maintain a friendly and professional tone.`);
 
-  const [trelloApiKey, setTrelloApiKey] = useState('••••••••••••••••••••••••••••••');
-  const [trelloToken, setTrelloToken] = useState('••••••••••••••••••••••••••••••');
-  const [trelloBoardId, setTrelloBoardId] = useState('abc123def456');
-
   const saveWhatsAppSettings = () => {
     // In a real application, this would send the data to your backend
     toast.success('WhatsApp settings saved successfully');
@@ -35,24 +31,12 @@ Always maintain a friendly and professional tone.`);
   const saveAISettings = () => {
     toast.success('AI settings saved successfully');
   };
-  
-  const saveTrelloSettings = () => {
-    toast.success('Trello settings saved successfully');
-  };
 
   const testWhatsAppConnection = () => {
     toast.loading('Testing WhatsApp connection...');
     // Simulate API call
     setTimeout(() => {
       toast.success('WhatsApp connection successful');
-    }, 2000);
-  };
-  
-  const testTrelloConnection = () => {
-    toast.loading('Testing Trello connection...');
-    // Simulate API call
-    setTimeout(() => {
-      toast.success('Trello connection successful');
     }, 2000);
   };
 
@@ -69,7 +53,6 @@ Always maintain a friendly and professional tone.`);
         <TabList className="mb-6">
           <Tab>WhatsApp</Tab>
           <Tab>AI Configuration</Tab>
-          <Tab>Trello Integration</Tab>
           <Tab>Advanced</Tab>
         </TabList>
         
@@ -183,58 +166,6 @@ Always maintain a friendly and professional tone.`);
           
           <TabPanel>
             <Card>
-              <Title>Trello Integration</Title>
-              <Text className="mb-4">Configure the Trello integration for lead management</Text>
-              
-              <div className="space-y-4 mt-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Trello API Key</label>
-                  <TextInput 
-                    placeholder="Enter your Trello API key" 
-                    value={trelloApiKey}
-                    onChange={(e) => setTrelloApiKey(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Trello Token</label>
-                  <TextInput 
-                    placeholder="Enter your Trello token" 
-                    value={trelloToken}
-                    onChange={(e) => setTrelloToken(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Trello Board ID</label>
-                  <TextInput 
-                    placeholder="Enter your Trello board ID" 
-                    value={trelloBoardId}
-                    onChange={(e) => setTrelloBoardId(e.target.value)}
-                  />
-                </div>
-                
-                <div className="flex space-x-3 pt-4">
-                  <Button 
-                    icon={HiOutlineSave}
-                    onClick={saveTrelloSettings}
-                  >
-                    Save Changes
-                  </Button>
-                  <Button 
-                    variant="secondary" 
-                    icon={HiOutlineRefresh}
-                    onClick={testTrelloConnection}
-                  >
-                    Test Connection
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          </TabPanel>
-          
-          <TabPanel>
-            <Card>
               <Title>Advanced Settings</Title>
               <Text className="mb-4">Additional configuration options</Text>
               
@@ -249,34 +180,14 @@ Always maintain a friendly and professional tone.`);
                   </Select>
                 </div>
                 
-                <div className="flex items-center mt-4">
-                  <input 
-                    id="auto-sync" 
-                    type="checkbox" 
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                    defaultChecked
-                  />
-                  <label htmlFor="auto-sync" className="ml-2 block text-sm text-gray-700">
-                    Automatically sync leads with Trello
+                <div className="mt-4">
+                  <label className="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      className="form-checkbox h-5 w-5 text-blue-600"
+                    />
+                    <span className="ml-2 text-sm text-gray-700">Enable detailed logging</span>
                   </label>
-                </div>
-                
-                <div className="flex items-center mt-2">
-                  <input 
-                    id="notifications" 
-                    type="checkbox" 
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                    defaultChecked
-                  />
-                  <label htmlFor="notifications" className="ml-2 block text-sm text-gray-700">
-                    Enable email notifications
-                  </label>
-                </div>
-                
-                <div className="flex space-x-3 pt-4">
-                  <Button icon={HiOutlineSave}>
-                    Save Changes
-                  </Button>
                 </div>
               </div>
             </Card>

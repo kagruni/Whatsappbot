@@ -8,8 +8,6 @@ const fs = require('fs');
 const fsPromises = require('fs').promises;
 const csv = require('csv-parser');
 const path = require('path');
-const Trello = require('trello-node-api');
-const trello = new Trello(process.env.TRELLO_API_KEY, process.env.TRELLO_TOKEN);
 const cron = require('node-cron');
 const { exec } = require('child_process');
 const crypto = require('crypto');
@@ -20,9 +18,6 @@ const openai = new OpenAI({
 const PORT = process.env.PORT || 3000;
 const STATUS_FILE_PATH = path.join(__dirname, '..', 'lead_status.json');
 const leadInfo = new Map();
-const BOARD_ID = process.env.TRELLO_BOARD_ID;
-const INCOMING_LIST_ID = process.env.TRELLO_INCOMING_LIST_ID;
-const LEADS_LIST_ID = process.env.TRELLO_LEADS_LIST_ID;
 
 const MAX_INITIATED_CONVERSATIONS = 950;
 const MAX_DELIVERED_CONVERSATIONS = 950;
@@ -41,8 +36,6 @@ function printConversationStatistics() {
   console.log('==================================\n');
 }
 
-
-// ... (keep your existing imports and configurations)
 const server = app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
   console.log('Configuration loaded:', 
@@ -81,7 +74,6 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
-
 
 function loadLeadStatus() {
   console.log('Attempting to load lead status from:', STATUS_FILE_PATH);
@@ -144,7 +136,6 @@ function markLeadAsContacted(phone, status = 'contacted') {
   }
 }
 
-
 function loadLeadsFromCSV(filePath) {
   return new Promise((resolve, reject) => {
     const results = [];
@@ -180,7 +171,6 @@ function loadLeadsFromCSV(filePath) {
   });
 }
 
-
 function autoDetectSeparator(filePath) {
   const firstLine = fs.readFileSync(path.resolve(__dirname, filePath), 'utf8').split('\n')[0];
   if (firstLine.includes(';')) return ';';
@@ -188,7 +178,6 @@ function autoDetectSeparator(filePath) {
   if (firstLine.includes('\t')) return '\t';
   return ','; // default to comma if can't detect
 }
-
 
 async function initiateConversations() {
   console.time('Total execution time');
@@ -296,7 +285,7 @@ const conversationHistory = new Map();
 
 const SYSTEM_MESSAGE = `
 Role:
-You are an AI assistant representing MP Concepts. Your goal is to interact with potential clients, providing concise yet informative responses about the company’s services, pricing, and products. Ensure responses are brief and to the point, focusing on essential details, and avoid lengthy explanations unless specifically requested by the client.
+You are an AI assistant representing MP Concepts. Your goal is to interact with potential clients, providing concise yet informative responses about the company's services, pricing, and products. Ensure responses are brief and to the point, focusing on essential details, and avoid lengthy explanations unless specifically requested by the client.
 
 Context:
 MP Concepts specializes in high-quality craftsmanship and luxury home renovations. The company offers services such as marble, tiles, sanitary ware, interior design, and full home renovation. The focus is on delivering German-quality materials and workmanship at various price points.
@@ -410,81 +399,17 @@ async function handleMessage(message) {
 }
 
 async function findCardForLead(userId) {
-  try {
-    const url = `https://api.trello.com/1/boards/${BOARD_ID}/cards?key=${process.env.TRELLO_API_KEY}&token=${process.env.TRELLO_TOKEN}`;
-    const response = await axios.get(url);
-    const cards = response.data;
-    
-    console.log(`Searching for card with userId: ${userId}`);
-    const foundCard = cards.find(card => card.name.includes(userId));
-    
-    if (foundCard) {
-      console.log(`Found existing card for ${userId}:`, foundCard);
-      return foundCard;
-    } else {
-      console.log(`No existing card found for ${userId}`);
-      return null;
-    }
-  } catch (error) {
-    console.error('Error finding card for lead:', error);
-    return null;
-  }
+  return null;
 }
 
-
-
 async function createCardForLead(userId, name) {
-  try {
-    // Double-check if the card exists before creating a new one
-    let existingCard = await findCardForLead(userId);
-    if (existingCard) {
-      console.log(`Card already exists for ${userId}. Using existing card.`);
-      return existingCard;
-    }
-
-    const cardName = `${name} (${userId})`;
-    const cardDescription = "Conversation History:\n\n";
-    const url = `https://api.trello.com/1/cards?key=${process.env.TRELLO_API_KEY}&token=${process.env.TRELLO_TOKEN}`;
-    const data = {
-      name: cardName,
-      desc: cardDescription,
-      idList: INCOMING_LIST_ID,
-      pos: 'top'
-    };
-    const response = await axios.post(url, data);
-    console.log(`Created new card for ${userId}:`, response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error creating card for lead:', error);
-    throw error;
-  }
+  return null;
 }
 
 async function updateCardConversation(cardId, userMessage, aiResponse) {
-  try {
-    const url = `https://api.trello.com/1/cards/${cardId}?key=${process.env.TRELLO_API_KEY}&token=${process.env.TRELLO_TOKEN}`;
-    const response = await axios.get(url);
-    let currentDesc = response.data.desc;
-    
-    const newConversation = `User: ${userMessage}\nAI: ${aiResponse}\n\n`;
-    const updatedDesc = currentDesc + newConversation;
-    
-    await axios.put(url, { desc: updatedDesc });
-    console.log(`Updated conversation for card ${cardId}`);
-  } catch (error) {
-    console.error('Error updating card conversation:', error);
-  }
 }
 
-
 async function moveCardToLeadsList(cardId) {
-  try {
-    const url = `https://api.trello.com/1/cards/${cardId}?key=${process.env.TRELLO_API_KEY}&token=${process.env.TRELLO_TOKEN}`;
-    await axios.put(url, { idList: LEADS_LIST_ID });
-    console.log(`Moved card ${cardId} to Leads list`);
-  } catch (error) {
-    console.error('Error moving card to Leads list:', error);
-  }
 }
 
 function isLeadInterested(userMessage, aiResponse) {
@@ -632,7 +557,6 @@ async function verifyWhatsAppSetup() {
     return false;
   }
 }
-
 
 app.get('/webhook', (req, res) => {
   console.log('Received GET request to /webhook');

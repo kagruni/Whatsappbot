@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "WhatsApp Bot Dashboard",
-  description: "Management interface for WhatsApp AI chatbot with Trello integration",
+  description: "Management interface for WhatsApp AI chatbot",
 };
 
 interface RootLayoutProps {
