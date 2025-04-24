@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -9,8 +11,10 @@ import {
   HiOutlineDocumentText,
   HiOutlineLogout,
   HiOutlineMenuAlt2,
-  HiOutlineX
+  HiOutlineX,
+  HiOutlineUser
 } from 'react-icons/hi';
+import { useAuth } from '../context/AuthContext';
 
 interface NavItem {
   label: string;
@@ -22,6 +26,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const { user, signOut } = useAuth();
 
   useEffect(() => {
     // Check if we're on mobile
@@ -49,7 +54,16 @@ export default function Sidebar() {
     { label: 'Leads', href: '/leads', icon: <HiOutlineUsers style={{ height: '1.25rem', width: '1.25rem' }} /> },
     { label: 'Analytics', href: '/analytics', icon: <HiOutlineDocumentText style={{ height: '1.25rem', width: '1.25rem' }} /> },
     { label: 'Settings', href: '/settings', icon: <HiOutlineCog style={{ height: '1.25rem', width: '1.25rem' }} /> },
+    { label: 'Profile', href: '/profile', icon: <HiOutlineUser style={{ height: '1.25rem', width: '1.25rem' }} /> },
   ];
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
 
   return (
     <>
@@ -199,67 +213,53 @@ export default function Sidebar() {
           borderTop: '1px solid rgba(255, 255, 255, 0.1)',
           paddingTop: '1rem'
         }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            padding: '0.75rem 1rem', 
-            borderRadius: '0.5rem', 
-            backgroundColor: 'rgba(31, 41, 55, 0.7)',
-            marginBottom: '1rem',
-            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.05)'
-          }}>
-            <div style={{ 
-              height: '2.5rem', 
-              width: '2.5rem', 
-              borderRadius: '0.5rem', 
-              background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              marginRight: '0.75rem',
-              boxShadow: '0 0 10px rgba(59, 130, 246, 0.3)'
+          {user && (
+            <div style={{
+              marginBottom: '1rem',
+              padding: '0.75rem',
+              backgroundColor: 'rgba(30, 41, 59, 0.5)',
+              borderRadius: '0.5rem'
             }}>
-              <span style={{ fontWeight: 500 }}>AI</span>
-            </div>
-            <div>
-              <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>WhatsApp AI Bot</p>
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                fontSize: '0.75rem'
+              <div style={{
+                fontSize: '0.875rem',
+                fontWeight: 500,
+                marginBottom: '0.25rem',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
               }}>
-                <span style={{ 
-                  height: '0.5rem', 
-                  width: '0.5rem', 
-                  borderRadius: '9999px', 
-                  backgroundColor: '#10b981',
-                  marginRight: '0.25rem' 
-                }}></span>
-                <span style={{ color: '#9ca3af' }}>Online</span>
+                {user.email}
+              </div>
+              <div style={{
+                fontSize: '0.75rem',
+                color: '#9ca3af'
+              }}>
+                Logged in
               </div>
             </div>
-          </div>
+          )}
           
-          <button style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-            padding: '0.75rem',
-            borderRadius: '0.5rem',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            color: '#ef4444',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
-            cursor: 'pointer',
-            transition: 'all 150ms ease'
-          }}>
+          <button
+            onClick={handleSignOut}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              padding: '0.75rem 1rem',
+              borderRadius: '0.5rem',
+              backgroundColor: 'rgba(220, 38, 38, 0.1)',
+              color: '#f87171',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all 150ms ease'
+            }}
+          >
             <HiOutlineLogout style={{ 
               height: '1.25rem', 
               width: '1.25rem', 
-              marginRight: '0.5rem' 
+              marginRight: '0.75rem' 
             }} />
-            Sign Out
+            <span>Sign Out</span>
           </button>
         </div>
       </div>
