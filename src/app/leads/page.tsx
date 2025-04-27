@@ -1,13 +1,36 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import DashboardLayout from '@/components/DashboardLayout';
-import { Card, Title, Text, Button, Badge, Select, SelectItem, Table, TableHead, TableRow, TableHeaderCell, TableBody, TableCell } from '@tremor/react';
-import { HiOutlineRefresh, HiOutlineExternalLink, HiOutlineTrash, HiOutlineDocumentAdd, HiOutlineUpload } from 'react-icons/hi';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import supabase from '@/lib/supabase';
+import DashboardLayout from '@/components/DashboardLayout';
+
+// Icons
+import { 
+  DownloadIcon, 
+  PlusCircleIcon, 
+  RefreshCcwIcon, 
+  SearchIcon, 
+  TrashIcon, 
+  ExternalLinkIcon, 
+  FileIcon,
+  CalendarIcon,
+  SmartphoneIcon,
+  MailIcon
+} from 'lucide-react';
+
+// ShadCN UI Components
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // Types
 interface Lead {
@@ -49,6 +72,7 @@ export default function LeadsPage() {
   const [isUploadingCSV, setIsUploadingCSV] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -124,11 +148,16 @@ export default function LeadsPage() {
     }
   };
   
-  // Filter leads based on status and source
+  // Filter leads based on status, source, and search query
   const filteredLeads = leads.filter(lead => {
     const matchesStatus = statusFilter === 'all' || lead.status === statusFilter;
     const matchesSource = sourceFilter === 'all' || lead.source === sourceFilter;
-    return matchesStatus && matchesSource;
+    const matchesSearch = !searchQuery || 
+      lead.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      lead.phone.includes(searchQuery) || 
+      (lead.email && lead.email.toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    return matchesStatus && matchesSource && matchesSearch;
   });
 
   // Get unique statuses and sources for filter dropdowns
@@ -245,263 +274,361 @@ export default function LeadsPage() {
     setNewLead(prev => ({ ...prev, [name]: value }));
   };
 
+  const getStatusBadgeVariant = (status: string) => {
+    switch (status) {
+      case 'New Lead':
+        return 'default';
+      case 'In Progress':
+        return 'secondary';
+      case 'Contacted':
+        return 'outline';
+      case 'Qualified':
+        return 'success';
+      case 'Closed':
+        return 'destructive';
+      default:
+        return 'default';
+    }
+  };
+
   return (
     <DashboardLayout>
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Lead Management</h1>
-        <p className="text-gray-600">
-          Manage your customer leads
-        </p>
-      </div>
-
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-red-700 font-medium">{error}</p>
-          <button 
-            onClick={fetchLeads} 
-            className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-          >
-            Try again
-          </button>
-        </div>
-      )}
-
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-        <div className="flex flex-col md:flex-row gap-4">
-          <Select 
-            value={statusFilter} 
-            onValueChange={setStatusFilter}
-            className="w-48"
-          >
-            <SelectItem value="all">All Statuses</SelectItem>
-            {uniqueStatuses.map(status => (
-              <SelectItem key={status} value={status}>{status}</SelectItem>
-            ))}
-          </Select>
-          <Select 
-            value={sourceFilter} 
-            onValueChange={setSourceFilter}
-            className="w-48"
-          >
-            <SelectItem value="all">All Sources</SelectItem>
-            {uniqueSources.map(source => (
-              <SelectItem key={source} value={source}>{source}</SelectItem>
-            ))}
-          </Select>
-        </div>
-        <div className="flex gap-2">
-          <Button 
-            icon={HiOutlineRefresh}
-            variant="secondary"
-            onClick={fetchLeads}
-            loading={isLoading}
-          >
-            Refresh
-          </Button>
-          <Button 
-            icon={HiOutlineUpload}
-            variant="secondary"
-            onClick={() => fileInputRef.current?.click()}
-            loading={isUploadingCSV}
-          >
-            Upload CSV
-          </Button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleCSVUpload} 
-            accept=".csv" 
-            className="hidden" 
-          />
-          <Button 
-            icon={HiOutlineDocumentAdd}
-            onClick={() => setIsAddingLead(true)}
-          >
-            Add Lead
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <Title>Leads</Title>
-        <Text className="mb-4">Complete list of leads in your system</Text>
+      <style jsx global>{`
+        /* Make all text black in the leads page */
+        .leads-page,
+        .leads-page * {
+          color: black !important;
+        }
         
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeaderCell>Name</TableHeaderCell>
-              <TableHeaderCell>Contact</TableHeaderCell>
-              <TableHeaderCell>Status</TableHeaderCell>
-              <TableHeaderCell>Source</TableHeaderCell>
-              <TableHeaderCell>Date Added</TableHeaderCell>
-              <TableHeaderCell>Actions</TableHeaderCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
-                  <div className="flex justify-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : filteredLeads.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
-                  No leads match your filters
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredLeads.map((lead) => (
-                <motion.tr 
-                  key={lead.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.3 }}
-                  className="border-b"
-                >
-                  <TableCell>{lead.name}</TableCell>
-                  <TableCell>
-                    <div>
-                      <div>{lead.phone}</div>
-                      <div className="text-xs text-gray-500">{lead.email}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge color={statusColors[lead.status] || 'gray'}>
-                      {lead.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{lead.source}</TableCell>
-                  <TableCell>{new Date(lead.created_at).toLocaleDateString()}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <button 
-                        className="p-1 text-gray-500 hover:text-blue-600 transition-colors"
-                        title="View Details"
-                        tabIndex={0}
-                        aria-label="View lead details"
-                        onClick={() => {/* View lead details */}}
-                        onKeyDown={(e) => e.key === 'Enter' && {/* View lead details */}}
-                      >
-                        <HiOutlineExternalLink className="h-5 w-5" />
-                      </button>
-                      <button 
-                        className="p-1 text-gray-500 hover:text-red-600 transition-colors"
-                        title="Delete lead"
-                        tabIndex={0}
-                        aria-label="Delete lead"
-                        onClick={() => handleDeleteLead(lead.id)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleDeleteLead(lead.id)}
-                      >
-                        <HiOutlineTrash className="h-5 w-5" />
-                      </button>
-                    </div>
-                  </TableCell>
-                </motion.tr>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
-      {isAddingLead && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.2 }}
-            className="w-full max-w-md"
-          >
-            <Card>
-              <div className="flex justify-between items-center mb-4">
-                <Title>Add New Lead</Title>
-                <button 
-                  onClick={() => setIsAddingLead(false)}
-                  className="text-gray-500 hover:text-gray-700 transition-colors"
-                  tabIndex={0}
-                  aria-label="Close dialog"
-                  onKeyDown={(e) => e.key === 'Enter' && setIsAddingLead(false)}
-                >
-                  ✕
-                </button>
-              </div>
-              <form className="space-y-4" onSubmit={handleAddLead}>
-                <div>
-                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">Name</label>
-                  <input 
-                    id="name"
-                    name="name"
-                    type="text" 
-                    value={newLead.name}
-                    onChange={handleInputChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                    placeholder="Full Name" 
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="phone" className="block text-sm font-medium text-gray-700">Phone</label>
-                  <input 
-                    id="phone"
-                    name="phone"
-                    type="tel" 
-                    value={newLead.phone}
-                    onChange={handleInputChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                    placeholder="+1234567890" 
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
-                  <input 
-                    id="email"
-                    name="email"
-                    type="email" 
-                    value={newLead.email}
-                    onChange={handleInputChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                    placeholder="email@example.com" 
-                  />
-                </div>
-                <div>
-                  <label htmlFor="source" className="block text-sm font-medium text-gray-700">Source</label>
-                  <select 
-                    id="source"
-                    name="source"
-                    value={newLead.source}
-                    onChange={handleInputChange}
-                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                  >
-                    <option value="WhatsApp">WhatsApp</option>
-                    <option value="Website">Website</option>
-                    <option value="Referral">Referral</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div className="flex justify-end space-x-2 pt-4">
-                  <Button 
-                    variant="secondary" 
-                    onClick={() => setIsAddingLead(false)}
-                    type="button"
-                  >
-                    Cancel
-                  </Button>
-                  <Button 
-                    type="submit"
-                    loading={isSubmitting}
-                  >
-                    Add Lead
-                  </Button>
-                </div>
-              </form>
-            </Card>
-          </motion.div>
+        /* Preserve the color of destructive elements */
+        .border-destructive * {
+          color: rgb(239, 68, 68) !important;
+        }
+        
+        /* Make sure icons are visible */
+        .leads-page svg {
+          stroke: black;
+        }
+        
+        /* Dialog content should also be black */
+        [role="dialog"] * {
+          color: black !important;
+        }
+        
+        /* Make sure placeholder text is visible */
+        .leads-page input::placeholder {
+          color: rgba(0, 0, 0, 0.5) !important;
+        }
+      `}</style>
+      
+      <div className="space-y-6 leads-page">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Lead Management</h1>
+          <p className="mt-2">
+            Track and manage your customer leads in one place
+          </p>
         </div>
-      )}
+
+        {error && (
+          <Card className="border-destructive">
+            <CardHeader className="text-destructive">
+              <CardTitle className="text-destructive flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-alert-circle">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" x2="12" y1="8" y2="12"></line>
+                  <line x1="12" x2="12.01" y1="16" y2="16"></line>
+                </svg>
+                Error
+              </CardTitle>
+              <CardDescription className="text-destructive">{error}</CardDescription>
+            </CardHeader>
+            <CardFooter>
+              <Button variant="outline" onClick={fetchLeads}>
+                Try again
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="flex flex-col space-y-4">
+            <div className="relative">
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" />
+              <Input 
+                placeholder="Search leads..." 
+                className="pl-10"
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-4">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Status</SelectLabel>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    {uniqueStatuses.map(status => (
+                      <SelectItem key={status} value={status}>{status}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Filter by source" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Source</SelectLabel>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    {uniqueSources.map(source => (
+                      <SelectItem key={source} value={source}>{source}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="icon" onClick={fetchLeads} disabled={isLoading}>
+              <RefreshCcwIcon className="h-4 w-4" />
+              <span className="sr-only">Refresh</span>
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingCSV}
+              className="gap-2"
+            >
+              <FileIcon className="h-4 w-4" />
+              <span>Upload CSV</span>
+            </Button>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleCSVUpload} 
+              accept=".csv" 
+              className="hidden" 
+            />
+            <Dialog open={isAddingLead} onOpenChange={setIsAddingLead}>
+              <DialogTrigger asChild>
+                <Button className="gap-2">
+                  <PlusCircleIcon className="h-4 w-4" />
+                  <span>Add Lead</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add New Lead</DialogTitle>
+                  <DialogDescription>
+                    Fill in the details to add a new lead to your system.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleAddLead} className="space-y-4">
+                  <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="name" className="text-right">
+                        Name
+                      </Label>
+                      <Input
+                        id="name"
+                        name="name"
+                        value={newLead.name}
+                        onChange={handleInputChange}
+                        placeholder="Full Name"
+                        className="col-span-3"
+                        required
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="phone" className="text-right">
+                        Phone
+                      </Label>
+                      <Input
+                        id="phone"
+                        name="phone"
+                        value={newLead.phone}
+                        onChange={handleInputChange}
+                        placeholder="+1234567890"
+                        className="col-span-3"
+                        required
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="email" className="text-right">
+                        Email
+                      </Label>
+                      <Input
+                        id="email"
+                        name="email"
+                        type="email"
+                        value={newLead.email}
+                        onChange={handleInputChange}
+                        placeholder="email@example.com"
+                        className="col-span-3"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="source" className="text-right">
+                        Source
+                      </Label>
+                      <Select 
+                        name="source" 
+                        value={newLead.source} 
+                        onValueChange={(value: string) => setNewLead({...newLead, source: value})}
+                      >
+                        <SelectTrigger className="col-span-3">
+                          <SelectValue placeholder="Select a source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="WhatsApp">WhatsApp</SelectItem>
+                          <SelectItem value="Website">Website</SelectItem>
+                          <SelectItem value="Referral">Referral</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button type="submit" disabled={isSubmitting}>
+                      {isSubmitting ? "Adding..." : "Add Lead"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Your Leads 
+              <Badge className="ml-2">{filteredLeads.length}</Badge>
+            </CardTitle>
+            <CardDescription>
+              Manage and track all your leads
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Date Added</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  Array.from({ length: 5 }).map((_, index) => (
+                    <TableRow key={index}>
+                      <TableCell><Skeleton className="h-5 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-32" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-24" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : filteredLeads.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-24 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <FileIcon className="h-10 w-10 mb-2 opacity-20" />
+                        {searchQuery ? 'No leads match your search' : 'No leads found'}
+                        <Button variant="link" onClick={fetchLeads} className="mt-2">
+                          Refresh
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredLeads.map((lead) => (
+                    <motion.tr
+                      key={lead.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                      className="group"
+                    >
+                      <TableCell className="font-medium">{lead.name}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-1 text-sm">
+                            <SmartphoneIcon className="h-3 w-3" />
+                            <span>{lead.phone}</span>
+                          </div>
+                          {lead.email && (
+                            <div className="flex items-center gap-1 text-xs mt-1">
+                              <MailIcon className="h-3 w-3" />
+                              <span>{lead.email}</span>
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusBadgeVariant(lead.status)}>
+                          {lead.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{lead.source}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1 text-sm">
+                          <CalendarIcon className="h-3 w-3" />
+                          <span>{new Date(lead.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button 
+                            variant="ghost" 
+                            size="icon"
+                            tabIndex={0}
+                            aria-label="View lead details"
+                            onClick={() => {/* View lead details */}}
+                            onKeyDown={(e) => e.key === 'Enter' && {/* View lead details */}}
+                          >
+                            <ExternalLinkIcon className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            tabIndex={0}
+                            aria-label="Delete lead"
+                            onClick={() => handleDeleteLead(lead.id)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleDeleteLead(lead.id)}
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </motion.tr>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+          <CardFooter className="flex justify-between border-t p-4">
+            <div className="text-sm">
+              Showing {filteredLeads.length} of {leads.length} leads
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button variant="outline" size="sm" className="gap-1">
+                <DownloadIcon className="h-4 w-4" />
+                <span>Export</span>
+              </Button>
+            </div>
+          </CardFooter>
+        </Card>
+      </div>
     </DashboardLayout>
   );
 } 

@@ -5,6 +5,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { AuthProvider } from "../context/AuthContext";
 import RouteGuard from '../components/RouteGuard';
+import { ThemeProvider } from "@/components/theme-provider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -19,14 +20,16 @@ interface RootLayoutProps {
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
-        <AuthProvider>
-          <RouteGuard>
-            {children}
-          </RouteGuard>
-          <Toaster position="top-right" />
-        </AuthProvider>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <AuthProvider>
+            <RouteGuard>
+              {children}
+            </RouteGuard>
+            <Toaster position="top-right" />
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
