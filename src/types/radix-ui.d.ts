@@ -114,4 +114,31 @@ declare module '@radix-ui/react-select' {
     ScrollUpButton,
     ScrollDownButton
   };
+}
+
+declare module '@radix-ui/react-separator' {
+  import * as React from 'react';
+
+  type SeparatorOwnProps = {
+    /**
+     * The orientation of the separator.
+     * @default 'horizontal'
+     */
+    orientation?: 'horizontal' | 'vertical';
+    /**
+     * Whether the separator is purely decorative, in which case it is hidden from screen readers.
+     * @default true
+     */
+    decorative?: boolean;
+  };
+
+  interface SeparatorProps extends
+    SeparatorOwnProps,
+    React.ComponentPropsWithoutRef<'div'> {}
+
+  const Root: React.ForwardRefExoticComponent<SeparatorProps & React.RefAttributes<HTMLDivElement>>;
+
+  export {
+    Root
+  };
 } 
