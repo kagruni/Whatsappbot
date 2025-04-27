@@ -6,6 +6,8 @@ import { Card, Title, Text, Button, Badge, Select, SelectItem, Table, TableHead,
 import { HiOutlineRefresh, HiOutlineExternalLink, HiOutlineTrash, HiOutlineDocumentAdd, HiOutlineUpload } from 'react-icons/hi';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
+import { useAuth } from '@/context/AuthContext';
+import supabase from '@/lib/supabase';
 
 // Types
 interface Lead {
@@ -59,23 +61,64 @@ export default function LeadsPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  const { user, loading: authLoading } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  
   useEffect(() => {
-    fetchLeads();
-  }, []);
+    if (user && !authLoading) {
+      fetchLeads();
+    }
+  }, [user, authLoading]);
   
   const fetchLeads = async () => {
+    if (!user) {
+      setError('You must be logged in to view leads');
+      setLeads([]);
+      setIsLoading(false);
+      return;
+    }
+    
+    setError(null);
     setIsLoading(true);
     try {
-      const response = await fetch('/api/leads');
-      if (!response.ok) {
-        throw new Error('Failed to fetch leads');
+      // First try to fetch directly from Supabase for better error handling
+      const { data, error } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        throw new Error(error.message);
       }
-      const data = await response.json();
-      setLeads(data);
-    } catch (error) {
+      
+      if (data) {
+        setLeads(data);
+        return;
+      }
+      
+      // Fall back to API route if direct query fails
+      const response = await fetch('/api/leads');
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || `Failed to fetch leads: ${response.status} ${response.statusText}`;
+        throw new Error(errorMessage);
+      }
+      
+      const apiData = await response.json();
+      setLeads(apiData);
+    } catch (error: any) {
       console.error('Error fetching leads:', error);
-      // Use mock data for now
-      setLeads(mockLeads);
+      setError(error.message || 'Failed to fetch leads');
+      toast.error(`Failed to fetch leads: ${error.message || 'Unknown error'}`);
+      // Fall back to mock data in development environment only
+      if (process.env.NODE_ENV === 'development') {
+        setLeads(mockLeads);
+        toast.info('Using mock data for development');
+      } else {
+        setLeads([]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -210,6 +253,18 @@ export default function LeadsPage() {
           Manage your customer leads
         </p>
       </div>
+
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+          <p className="text-red-700 font-medium">{error}</p>
+          <button 
+            onClick={fetchLeads} 
+            className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div className="flex flex-col md:flex-row gap-4">
