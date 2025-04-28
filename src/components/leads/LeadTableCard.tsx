@@ -46,9 +46,19 @@ const LeadTableCard: React.FC<LeadTableCardProps> = ({
   };
 
   return (
-    <Card className="shadow-sm border border-gray-200 rounded-xl overflow-hidden w-full">
-      <CardHeader className="bg-white pt-5 pb-3 px-6 border-b border-gray-100">
-        <Flex direction="column" className="sm:flex-row sm:justify-between sm:items-center gap-2">
+    <Card className="border border-gray-200 rounded-xl w-full" style={{ 
+      width: '100%', 
+      margin: 0, 
+      padding: 0, 
+      boxSizing: 'border-box',
+      overflow: 'hidden'
+    }}>
+      <CardHeader className="bg-white border-b border-gray-100" style={{ 
+        width: '100%', 
+        padding: '16px 20px', 
+        boxSizing: 'border-box' 
+      }}>
+        <Flex direction="column" className="sm:flex-row sm:justify-between sm:items-center gap-2 w-full">
           <Flex direction="column">
             <CardTitle className="text-gray-800 flex items-center">
               Your Leads 
@@ -62,7 +72,10 @@ const LeadTableCard: React.FC<LeadTableCardProps> = ({
           </Flex>
         </Flex>
       </CardHeader>
-      <CardContent className="p-0">
+      <div className="w-full overflow-auto bg-white" style={{ 
+        width: '100%', 
+        boxSizing: 'border-box' 
+      }}>
         <LeadTable 
           leads={leads}
           filteredLeads={filteredLeads}
@@ -71,8 +84,12 @@ const LeadTableCard: React.FC<LeadTableCardProps> = ({
           handleDeleteLead={handleDeleteLead}
           fetchLeads={fetchLeads}
         />
-      </CardContent>
-      <CardFooter className="justify-between border-t border-gray-100 p-4 bg-gray-50">
+      </div>
+      <CardFooter className="justify-between border-t border-gray-100 bg-gray-50" style={{ 
+        padding: '12px 20px', 
+        width: '100%', 
+        boxSizing: 'border-box' 
+      }}>
         <Text className="text-sm font-medium text-gray-700">
           Showing {filteredLeads.length} of {leads.length} leads
         </Text>

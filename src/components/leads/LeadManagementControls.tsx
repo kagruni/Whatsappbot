@@ -79,11 +79,12 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
       variants={itemVariants}
       initial="hidden"
       animate="visible"
+      style={{ width: '100%' }}
     >
       {/* Main Control Panel */}
-      <Card className="mb-4 shadow-sm w-full">
-        <CardContent className="p-4">
-          <Flex className="relative">
+      <Card className="mb-4 shadow-sm w-full" style={{ width: '100%' }}>
+        <CardContent className="p-4 w-full">
+          <Flex className="relative w-full">
             <Flex className="absolute inset-y-0 left-0 pl-3 items-center pointer-events-none">
               <SearchIcon className="h-4 w-4 text-gray-400" />
             </Flex>
@@ -92,6 +93,7 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
               className="pl-10 h-11 bg-gray-50 border border-gray-200 rounded-md w-full text-gray-800 text-sm"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: '100%' }}
             />
           </Flex>
         </CardContent>

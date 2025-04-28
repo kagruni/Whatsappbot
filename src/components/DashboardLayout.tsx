@@ -35,7 +35,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <main style={{ 
         flex: '1 1 0%', 
         overflowY: 'auto', 
-        padding: '2rem',
+        padding: pathname === '/leads' ? '1rem' : '2rem',
         marginLeft: isMobile ? '0' : '16rem',
         backgroundImage: 'radial-gradient(circle at top right, rgba(59, 130, 246, 0.03), transparent 400px), radial-gradient(circle at bottom left, rgba(139, 92, 246, 0.03), transparent 400px)',
         position: 'relative',
@@ -43,7 +43,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         transition: 'margin-left 0.3s ease'
       }}>
         <div style={{ 
-          maxWidth: pathname === '/conversations' ? 'none' : '1400px',
+          maxWidth: pathname === '/conversations' || pathname === '/leads' ? 'none' : '1400px',
           margin: '0 auto',
           paddingTop: isMobile ? '3.5rem' : '0'
         }}>

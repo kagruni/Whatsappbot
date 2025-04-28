@@ -250,7 +250,7 @@ export default function LeadsPage() {
 
   return (
     <DashboardLayout>
-      <Container className="p-6 w-full">
+      <Container className="w-full" size="full" padding="none">
         <motion.div 
           variants={containerVariants}
           initial="hidden"
@@ -312,6 +312,7 @@ export default function LeadsPage() {
           <motion.div 
             variants={itemVariants}
             className="mt-6 w-full"
+            style={{ width: '100%', maxWidth: '100%', margin: 0, marginTop: '1.5rem', padding: 0 }}
           >
             <LeadTableCard
               leads={leads}
