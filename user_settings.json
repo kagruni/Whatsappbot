@@ -1,0 +1,10 @@
+{
+  "admin": {
+    "openaiModel": "gpt-4o",
+    "whatsappToken": "EAAQsyhaTJtIBO1I7Qd77saDZC7FeeWXdzuBPUvYWvyW5aHoZC8zPf5GnGwQYe8f1cKQVB7ZBRuV5YxSB9xeTyZBsB5KNm2WbeZB5YtyOkpBgerJNKaK3wRKojkSWmiRjfRZCwhrkWYekHu9x84K5PcrFHyBxdORFWgUJIzCizDZApjevJukkl7eqoXuwTLBGhxZCEgZDZD",
+    "whatsappVerifyToken": "bot2",
+    "templateId": "opener2",
+    "systemPrompt": "",
+    "userId": "admin"
+  }
+}

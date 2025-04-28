@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import db from '../../database';
+import db from './database';
 
 // Cache OpenAI instances by user
 const openaiInstances = new Map();
@@ -14,11 +14,23 @@ async function init() {
 async function getOpenAIForUser(userId) {
   // Check if instance exists in cache
   if (openaiInstances.has(userId)) {
+    console.log(`Using cached OpenAI instance for user ${userId}`);
     return openaiInstances.get(userId);
   }
   
   // Get user settings
   const settings = await db.getUserSettings(userId);
+  
+  console.log(`Creating OpenAI instance for user ${userId}`, {
+    hasApiKey: !!settings.openaiApiKey,
+    apiKeyLength: settings.openaiApiKey ? settings.openaiApiKey.length : 0,
+    model: settings.openaiModel
+  });
+  
+  if (!settings.openaiApiKey) {
+    console.error(`No OpenAI API key found for user ${userId} in Supabase user_settings`);
+    throw new Error(`OpenAI API key is missing for user ${userId} in Supabase user_settings`);
+  }
   
   // Create new OpenAI instance
   const openai = new OpenAI({
@@ -27,6 +39,7 @@ async function getOpenAIForUser(userId) {
   
   // Cache the instance
   openaiInstances.set(userId, openai);
+  console.log(`OpenAI instance created and cached for user ${userId}`);
   
   return openai;
 }
@@ -61,30 +74,79 @@ async function getSystemPromptForUser(userId) {
 // Get WhatsApp phone number ID for user
 async function getWhatsAppPhoneNumberId(userId) {
   const settings = await db.getUserSettings(userId);
+  
+  // Log values for debugging
+  console.log(`Getting WhatsApp Phone ID for user ${userId}:`, {
+    fromSettings: !!settings.whatsappPhoneNumberId,
+    phoneId: settings.whatsappPhoneNumberId
+  });
+  
+  if (!settings.whatsappPhoneNumberId) {
+    console.error(`WhatsApp Phone Number ID not found for user ${userId}`);
+    // Fail clearly rather than using empty values
+    throw new Error(`WhatsApp Phone Number ID not found for user ${userId}`);
+  }
+  
   return settings.whatsappPhoneNumberId;
 }
 
 // Get WhatsApp token for user
 async function getWhatsAppToken(userId) {
   const settings = await db.getUserSettings(userId);
+  
+  // Log values for debugging
+  console.log(`Getting WhatsApp token for user ${userId}:`, {
+    fromSettings: !!settings.whatsappToken,
+    tokenLength: settings.whatsappToken ? settings.whatsappToken.length : 0
+  });
+  
+  if (!settings.whatsappToken) {
+    console.error(`WhatsApp Token not found for user ${userId}`);
+    // Fail clearly rather than using empty values
+    throw new Error(`WhatsApp Token not found for user ${userId}`);
+  }
+  
   return settings.whatsappToken;
 }
 
 // Get template ID for user
 async function getTemplateId(userId) {
+  console.log(`Getting template ID for user: ${userId}`);
   const settings = await db.getUserSettings(userId);
-  return settings.templateId || 'opener2'; // Default to opener2 if not set
+  
+  // Check different possible field names (Supabase uses whatsapp_template_id, local file might use templateId)
+  const templateId = settings.whatsapp_template_id || settings.templateId || 'opener2';
+  
+  console.log(`Retrieved template ID for ${userId}: ${templateId}`);
+  return templateId;
 }
 
 // Get OpenAI model for user
 async function getOpenAIModel(userId) {
   const settings = await db.getUserSettings(userId);
-  return settings.openaiModel || 'gpt-4o'; // Default to gpt-4o if not set
+  const baseModel = settings.openaiModel || 'gpt-4o'; // Default to gpt-4o if not set
+  
+  // Check if we need to append the version date for newer models
+  if (baseModel.startsWith('gpt-4.1')) {
+    // For gpt-4.1 models, append the version date
+    const modelMap = {
+      'gpt-4.1': 'gpt-4.1-2025-04-14',
+      'gpt-4.1-mini': 'gpt-4.1-mini-2025-04-14',
+      'gpt-4.1-nano': 'gpt-4.1-nano-2025-04-14'
+    };
+    
+    return modelMap[baseModel] || baseModel;
+  }
+  
+  return baseModel;
 }
 
 // Find user ID by WhatsApp phone number
 async function getUserIdByPhone(phoneNumber) {
-  return db.getUserIdByPhone(phoneNumber);
+  console.log(`Looking up user ID for phone: ${phoneNumber}`);
+  const userId = await db.getUserIdByPhone(phoneNumber);
+  console.log(`Found user ID for phone ${phoneNumber}: ${userId}`);
+  return userId;
 }
 
 // Default system message (will be used if user has not set a custom one)

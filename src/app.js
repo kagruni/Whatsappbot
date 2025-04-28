@@ -514,6 +514,8 @@ function isLeadInterested(userMessage, aiResponse) {
 
 async function generateAIResponseForUser(userHistory, systemPrompt, openai, model) {
   try {
+    console.log(`Generating AI response with model: ${model}`);
+    
     const response = await openai.chat.completions.create({
       model: model,
       messages: [
@@ -522,9 +524,19 @@ async function generateAIResponseForUser(userHistory, systemPrompt, openai, mode
       ],
       max_tokens: 150
     });
+    
+    console.log('AI response generated successfully');
     return response.choices[0].message.content.trim();
   } catch (error) {
     console.error('Error generating AI response:', error);
+    console.error('OpenAI error details:', {
+      message: error.message,
+      type: error.type,
+      code: error.code,
+      statusCode: error.status || error.statusCode,
+      model: model
+    });
+    
     // Fallback to a safe response if there's an error
     return "Thank you for your message. I'm having trouble processing that right now. Please try again in a moment.";
   }

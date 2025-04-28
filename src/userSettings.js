@@ -79,7 +79,21 @@ async function getTemplateId(userId) {
 // Get OpenAI model for user
 async function getOpenAIModel(userId) {
   const settings = await db.getUserSettings(userId);
-  return settings.openaiModel || 'gpt-4o'; // Default to gpt-4o if not set
+  const baseModel = settings.openaiModel || 'gpt-4o'; // Default to gpt-4o if not set
+  
+  // Check if we need to append the version date for newer models
+  if (baseModel.startsWith('gpt-4.1')) {
+    // For gpt-4.1 models, append the version date
+    const modelMap = {
+      'gpt-4.1': 'gpt-4.1-2025-04-14',
+      'gpt-4.1-mini': 'gpt-4.1-mini-2025-04-14',
+      'gpt-4.1-nano': 'gpt-4.1-nano-2025-04-14'
+    };
+    
+    return modelMap[baseModel] || baseModel;
+  }
+  
+  return baseModel;
 }
 
 // Find user ID by WhatsApp phone number

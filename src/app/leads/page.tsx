@@ -74,6 +74,9 @@ export default function LeadsPage() {
   const { user, loading: authLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   
+  // Initialize state for the conversation initiation
+  const [isInitiatingConversations, setIsInitiatingConversations] = useState(false);
+  
   useEffect(() => {
     if (user && !authLoading) {
       fetchLeads();
@@ -280,24 +283,67 @@ export default function LeadsPage() {
     }
   };
 
+  // Function to handle initiating conversations
+  const handleInitiateConversations = async () => {
+    if (!user) {
+      toast.error('You must be logged in to initiate conversations');
+      return;
+    }
+
+    try {
+      setIsInitiatingConversations(true);
+      const response = await fetch('/api/leads/initiate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to initiate conversations: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      toast.success(`Successfully initiated ${data.stats.totalInitiated} conversations`);
+    } catch (error: any) {
+      console.error('Error initiating conversations:', error);
+      toast.error(`Failed to initiate conversations: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsInitiatingConversations(false);
+    }
+  };
+
   return (
     <DashboardLayout>
-      <Container className="w-full" size="full" padding="none">
-        <motion.div 
-          variants={containerVariants}
+      <Container>
+        <motion.div
           initial="hidden"
           animate="visible"
-          className="w-full"
+          variants={containerVariants}
         >
-          {/* Header Section */}
-          <motion.div 
-            className="mb-6 w-full"
-            variants={itemVariants}
-          >
-            <H1 className="mb-1 text-gray-800">Lead Management</H1>
-            <Small className="text-gray-600">
-              Track and manage your customer leads in one place
-            </Small>
+          <motion.div variants={itemVariants}>
+            <Flex justify="between" align="center" className="mb-6">
+              <H1>Leads Management</H1>
+              <Flex gap="md">
+                <Button onClick={() => setIsAddLeadDialogOpen(true)}>
+                  Add Lead
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Import CSV
+                </Button>
+                <Button 
+                  variant="secondary"
+                  onClick={handleInitiateConversations}
+                  disabled={isInitiatingConversations}
+                >
+                  {isInitiatingConversations ? 'Sending...' : 'Send WhatsApp Messages'}
+                </Button>
+              </Flex>
+            </Flex>
           </motion.div>
 
           {/* Control Section - Using the new component */}

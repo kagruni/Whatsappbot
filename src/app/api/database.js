@@ -1,6 +1,25 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
+
+// Create Supabase client
+function createSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error('Supabase URL or service key is missing');
+    throw new Error('Supabase configuration error');
+  }
+  
+  return createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    }
+  });
+}
 
 // Path to the user settings file
 const USER_SETTINGS_PATH = path.join(process.cwd(), 'user_settings.json');
@@ -59,26 +78,74 @@ async function loadAllUserSettings() {
 
 // Get settings for a specific user
 async function getUserSettings(userId) {
-  // Check if settings are in cache
-  if (userSettingsCache.has(userId)) {
-    return userSettingsCache.get(userId);
-  }
-  
-  // If not in cache, get from file
   try {
-    const data = await fs.readFile(USER_SETTINGS_PATH, 'utf8');
-    const settings = JSON.parse(data);
+    const supabase = createSupabaseClient();
     
-    if (settings[userId]) {
-      userSettingsCache.set(userId, settings[userId]);
-      return settings[userId];
+    console.log(`Getting Supabase settings for user: ${userId}`);
+    
+    // Get settings from user_settings table
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    
+    if (error) {
+      console.error(`Error getting Supabase settings for user ${userId}:`, error);
     }
     
-    // If user not found, return default settings
-    return { ...DEFAULT_SETTINGS, userId };
-  } catch (error) {
-    console.error(`Error getting settings for user ${userId}:`, error);
-    return { ...DEFAULT_SETTINGS, userId };
+    if (data) {
+      console.log(`Found Supabase settings for user ${userId}`, JSON.stringify(data, null, 2));
+      
+      // Map Supabase column names to our expected property names
+      const mappedSettings = {
+        userId: userId,
+        openaiApiKey: data.openai_api_key,
+        openaiModel: data.ai_model,
+        whatsappPhoneNumberId: data.whatsapp_phone_id,
+        templateId: data.whatsapp_template_id,
+        systemPrompt: data.system_prompt,
+        whatsappToken: data.whatsapp_token || process.env.WHATSAPP_TOKEN,
+        whatsappVerifyToken: data.whatsapp_verify_token || process.env.WHATSAPP_VERIFY_TOKEN
+      };
+      
+      console.log(`Mapped Supabase settings for ${userId}:`, {
+        hasApiKey: !!mappedSettings.openaiApiKey,
+        apiKeyLength: mappedSettings.openaiApiKey ? mappedSettings.openaiApiKey.length : 0,
+        model: mappedSettings.openaiModel,
+        hasPhoneId: !!mappedSettings.whatsappPhoneNumberId,
+        phoneId: mappedSettings.whatsappPhoneNumberId,
+        hasToken: !!mappedSettings.whatsappToken,
+        templateId: mappedSettings.templateId
+      });
+      
+      return mappedSettings;
+    }
+    
+    // If we didn't find settings in Supabase, fall back to defaults with environment variables
+    console.log(`No Supabase settings found for user ${userId}, using environment variables`);
+    return { 
+      userId,
+      openaiApiKey: process.env.OPENAI_API_KEY,
+      openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
+      whatsappToken: process.env.WHATSAPP_TOKEN,
+      whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+      whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN,
+      templateId: process.env.WHATSAPP_TEMPLATE_ID || 'opener2',
+      systemPrompt: '',
+    };
+  } catch (dbError) {
+    console.error(`Error accessing Supabase for user ${userId}:`, dbError);
+    return { 
+      userId,
+      openaiApiKey: process.env.OPENAI_API_KEY,
+      openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
+      whatsappToken: process.env.WHATSAPP_TOKEN,
+      whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+      whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN,
+      templateId: process.env.WHATSAPP_TEMPLATE_ID || 'opener2',
+      systemPrompt: '',
+    };
   }
 }
 
@@ -177,25 +244,49 @@ async function deleteUser(userId) {
 
 // Map phone numbers to user IDs
 async function getUserIdByPhone(phoneNumber) {
-  // Normalize phone number
-  phoneNumber = phoneNumber.replace(/\D/g, '');
-  
   try {
-    const data = await fs.readFile(USER_SETTINGS_PATH, 'utf8');
-    const settings = JSON.parse(data);
+    // Normalize phone number (remove non-digits)
+    const normalizedPhone = phoneNumber.replace(/\D/g, '');
+    console.log(`Looking for user with whatsapp_phone_id: ${normalizedPhone}`);
     
-    // Find user with matching phone number ID
-    for (const [userId, userSettings] of Object.entries(settings)) {
-      if (userSettings.whatsappPhoneNumberId === phoneNumber) {
-        return userId;
-      }
+    const supabase = createSupabaseClient();
+    
+    // Find user with matching phone number
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('user_id, whatsapp_phone_id')
+      .eq('whatsapp_phone_id', normalizedPhone);
+    
+    if (error) {
+      console.error('Error querying Supabase for user by phone ID:', error);
+      throw error;
     }
     
-    // Default to admin if no match found
-    return 'admin';
+    // If we found a user with this phone number, return their ID
+    if (data && data.length > 0) {
+      console.log(`Found user ${data[0].user_id} for phone ID ${normalizedPhone} in Supabase`);
+      return data[0].user_id;
+    }
+    
+    // If no user found with this phone number, try to find any user
+    // to handle the message with (first user in the table)
+    const { data: anyUser, error: anyUserError } = await supabase
+      .from('user_settings')
+      .select('user_id')
+      .limit(1);
+      
+    if (anyUserError) {
+      console.error('Error querying Supabase for any user:', anyUserError);
+    } else if (anyUser && anyUser.length > 0) {
+      console.log(`No user found for phone ${normalizedPhone}, using first available user: ${anyUser[0].user_id}`);
+      return anyUser[0].user_id;
+    }
+    
+    console.error(`No users found in database. Unable to handle message from ${normalizedPhone}`);
+    throw new Error(`No users found in database to handle message from ${normalizedPhone}`);
   } catch (error) {
     console.error('Error finding user by phone:', error);
-    return 'admin';
+    throw error;
   }
 }
 

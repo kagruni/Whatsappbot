@@ -1,5 +1,7 @@
 import axios from 'axios';
 import OpenAI from 'openai';
+import fs from 'fs';
+import path from 'path';
 import userSettings from '../userSettings';
 
 // Keep the important maps and variables
@@ -152,6 +154,12 @@ export async function handleMessage(message) {
     await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse);
     await markLeadAsContacted(phoneNumber);
 
+    // Check for trigger words
+    if (isLeadInterested(userMessage, aiResponse)) {
+      console.log(`Trigger words detected for ${phoneNumber}. Lead is interested.`);
+      // Handle interested leads (add your logic here)
+    }
+
     console.log('Message handling completed successfully');
     return true;
   } catch (error) {
@@ -163,6 +171,8 @@ export async function handleMessage(message) {
 // Generate AI response for user
 async function generateAIResponseForUser(userHistory, systemPrompt, openai, model) {
   try {
+    console.log(`Generating AI response with model: ${model}`);
+    
     const response = await openai.chat.completions.create({
       model: model,
       messages: [
@@ -171,9 +181,19 @@ async function generateAIResponseForUser(userHistory, systemPrompt, openai, mode
       ],
       max_tokens: 150
     });
+    
+    console.log('AI response generated successfully');
     return response.choices[0].message.content.trim();
   } catch (error) {
     console.error('Error generating AI response:', error);
+    console.error('OpenAI error details:', {
+      message: error.message,
+      type: error.type,
+      code: error.code,
+      statusCode: error.status || error.statusCode,
+      model: model
+    });
+    
     // Fallback to a safe response if there's an error
     return "Thank you for your message. I'm having trouble processing that right now. Please try again in a moment.";
   }
@@ -183,6 +203,23 @@ async function generateAIResponseForUser(userHistory, systemPrompt, openai, mode
 async function sendWhatsAppMessageForUser(userId, to, message) {
   const phoneNumberId = await userSettings.getWhatsAppPhoneNumberId(userId);
   const token = await userSettings.getWhatsAppToken(userId);
+  
+  console.log(`Preparing to send WhatsApp message for user ${userId}:`, {
+    hasPhoneId: !!phoneNumberId,
+    phoneIdValue: phoneNumberId,
+    hasToken: !!token,
+    tokenLength: token ? token.length : 0,
+    recipient: to,
+    messageLength: message ? message.length : 0
+  });
+  
+  if (!phoneNumberId) {
+    throw new Error(`WhatsApp Phone Number ID not found for user ${userId}`);
+  }
+  
+  if (!token) {
+    throw new Error(`WhatsApp Token not found for user ${userId}`);
+  }
   
   const url = `https://graph.facebook.com/v16.0/${phoneNumberId}/messages`;
 
@@ -208,21 +245,124 @@ async function sendWhatsAppMessageForUser(userId, to, message) {
     return response.data;
   } catch (error) {
     console.error('Error sending WhatsApp message:', error.response ? error.response.data : error.message);
+    console.error('WhatsApp request details:', {
+      url,
+      phoneNumberId,
+      tokenLength: token.length,
+      recipient: to
+    });
+    throw error;
+  }
+}
+
+// Send WhatsApp template message for user
+export async function sendWhatsAppTemplateMessageForUser(userId, to, components, imageUrl) {
+  if (!to) {
+    throw new Error('Recipient phone number is required');
+  }
+
+  const formattedNumber = to.startsWith('49') ? to : `49${to}`;
+  
+  // Get user-specific settings
+  const phoneNumberId = await userSettings.getWhatsAppPhoneNumberId(userId);
+  const token = await userSettings.getWhatsAppToken(userId);
+  const templateId = await userSettings.getTemplateId(userId);
+
+  try {
+    console.log(`Sending template message to ${formattedNumber}: ${templateId}`);
+    const response = await axios.post(
+      `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to: formattedNumber,
+        type: 'template',
+        template: {
+          name: templateId,
+          language: { code: 'en' },
+          components: [
+            {
+              type: 'header',
+              parameters: [
+                {
+                  type: 'image',
+                  image: {
+                    link: imageUrl
+                  }
+                }
+              ]
+            },
+            ...components
+          ]
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    console.log('Template message sent successfully:', response.data);
+    return response.data.messages[0].id; // Return the message ID
+  } catch (error) {
+    console.error('Error sending template message:', error.response ? error.response.data : error.message);
     throw error;
   }
 }
 
 // Mark lead as contacted
-async function markLeadAsContacted(phone, status = 'contacted') {
-  // Implement this function if needed, or import from another file
-  console.log(`Marking ${phone} as ${status}`);
+export async function markLeadAsContacted(phone, status = 'contacted') {
+  const phoneNumber = phone.replace(/\D/g, '');
+  const STATUS_FILE_PATH = path.join(process.cwd(), 'lead_status.json');
+  
+  let currentStatus = {};
+
+  try {
+    const fileContent = fs.readFileSync(STATUS_FILE_PATH, 'utf8');
+    currentStatus = JSON.parse(fileContent);
+  } catch (error) {
+    console.error('Error reading lead_status.json:', error);
+    // If there's an error reading the file, we'll start with an empty object
+  }
+
+  if (!currentStatus[phoneNumber] || !currentStatus[phoneNumber].contacted) {
+    currentStatus[phoneNumber] = {
+      contacted: true,
+      timestamp: new Date().toISOString(),
+      status: status
+    };
+
+    fs.writeFileSync(STATUS_FILE_PATH, JSON.stringify(currentStatus, null, 2));
+    console.log(`Updated local status for ${phoneNumber}: ${status}`);
+  } else {
+    console.log(`Skipped update for ${phoneNumber}: already contacted`);
+  }
+  
   return true;
 }
 
 // Handle message status updates
-function handleMessageStatus(status) {
+export function handleMessageStatus(status) {
   const { id, status: messageStatus, recipient_id } = status;
   console.log(`Message ${id} to ${recipient_id} status: ${messageStatus}`);
   
   // Implement additional handling if needed
+}
+
+// Check if lead is interested based on trigger words
+export function isLeadInterested(userMessage, aiResponse) {
+  const triggerWords = ['book', 'schedule', 'appointment', 'consultation', 'interested', 'learn more'];
+  const lowerUserMessage = userMessage.toLowerCase();
+  const lowerAiResponse = aiResponse.toLowerCase();
+  
+  const userTriggered = triggerWords.some(word => lowerUserMessage.includes(word));
+  const aiTriggered = triggerWords.some(word => lowerAiResponse.includes(word));
+  
+  if (userTriggered || aiTriggered) {
+    console.log(`Trigger words detected. User: ${userTriggered}, AI: ${aiTriggered}`);
+    return true;
+  }
+  
+  console.log('No trigger words detected.');
+  return false;
 } 
