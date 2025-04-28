@@ -82,8 +82,8 @@ const LeadTable: React.FC<LeadTableProps> = ({
   };
 
   return (
-    <Container className="overflow-x-auto bg-white border border-gray-200 rounded-lg shadow-sm" padding="none">
-      <Table>
+    <Container className="overflow-x-auto bg-white border border-gray-200 rounded-lg shadow-sm w-full" padding="none">
+      <Table className="w-full">
         <TableHeader>
           <TableRow className="bg-gray-50 border-b border-gray-200">
             <TableHead className="py-3 text-xs font-semibold text-gray-600">Name</TableHead>

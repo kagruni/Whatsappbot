@@ -118,6 +118,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
     
+    // Get the filename to use as source
+    const fileName = file.name;
+    const source = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'CSV Import'; // Remove file extension
+    console.log(`Using source: "${source}" from filename: "${fileName}"`);
+    
     console.log('Processing CSV file');
     // Parse CSV file
     const arrayBuffer = await file.arrayBuffer();
@@ -154,7 +159,7 @@ export async function POST(req: NextRequest) {
               phone: record.phone,
               email: record.email || null,
               status: record.status || 'New Lead',
-              source: record.source || 'CSV Import',
+              source: record.source || source, // Use filename as source, fallback to record.source if it exists
               created_at: new Date().toISOString()
             });
           } else {

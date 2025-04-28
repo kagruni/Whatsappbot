@@ -75,13 +75,13 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
 
   return (
     <motion.div
-      className="mb-6"
+      className="mb-6 w-full"
       variants={itemVariants}
       initial="hidden"
       animate="visible"
     >
       {/* Main Control Panel */}
-      <Card className="mb-4 shadow-sm">
+      <Card className="mb-4 shadow-sm w-full">
         <CardContent className="p-4">
           <Flex className="relative">
             <Flex className="absolute inset-y-0 left-0 pl-3 items-center pointer-events-none">

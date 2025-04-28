@@ -46,7 +46,7 @@ const LeadTableCard: React.FC<LeadTableCardProps> = ({
   };
 
   return (
-    <Card className="shadow-sm border border-gray-200 rounded-xl overflow-hidden">
+    <Card className="shadow-sm border border-gray-200 rounded-xl overflow-hidden w-full">
       <CardHeader className="bg-white pt-5 pb-3 px-6 border-b border-gray-100">
         <Flex direction="column" className="sm:flex-row sm:justify-between sm:items-center gap-2">
           <Flex direction="column">

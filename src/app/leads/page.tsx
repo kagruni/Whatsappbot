@@ -218,13 +218,26 @@ export default function LeadsPage() {
     if (!confirm('Are you sure you want to delete this lead?')) return;
     
     try {
+      // Get current session for authentication
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      
+      if (!accessToken) {
+        toast.error('Authentication error: Please log in again');
+        return;
+      }
+      
       const response = await fetch(`/api/leads?id=${id}`, {
         method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
       
+      const result = await response.json();
+      
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to delete lead');
+        throw new Error(result.error || 'Failed to delete lead');
       }
       
       toast.success('Lead deleted successfully');
@@ -237,15 +250,16 @@ export default function LeadsPage() {
 
   return (
     <DashboardLayout>
-      <Container className="p-6 max-w-7xl">
+      <Container className="p-6 w-full">
         <motion.div 
           variants={containerVariants}
           initial="hidden"
           animate="visible"
+          className="w-full"
         >
           {/* Header Section */}
           <motion.div 
-            className="mb-6"
+            className="mb-6 w-full"
             variants={itemVariants}
           >
             <H1 className="mb-1 text-gray-800">Lead Management</H1>
@@ -272,8 +286,8 @@ export default function LeadsPage() {
           />
 
         {error && (
-            <motion.div variants={itemVariants} className="my-4">
-              <Card className="border-red-300 shadow-md">
+            <motion.div variants={itemVariants} className="my-4 w-full">
+              <Card className="border-red-300 shadow-md w-full">
                 <CardHeader className="bg-red-50 text-red-800">
                   <CardTitle className="flex items-center gap-2">
                     <AlertCircleIcon className="h-5 w-5" />
@@ -297,7 +311,7 @@ export default function LeadsPage() {
           {/* Leads Table Section */}
           <motion.div 
             variants={itemVariants}
-            className="mt-6"
+            className="mt-6 w-full"
           >
             <LeadTableCard
               leads={leads}
