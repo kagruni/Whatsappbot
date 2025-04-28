@@ -6,4 +6,9 @@ export interface Lead {
   status: string;
   source: string;
   created_at: string;
+  title?: string;
+  first_name?: string;
+  last_name?: string;
+  city?: string;
+  company_name?: string;
 } 

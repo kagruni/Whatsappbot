@@ -118,6 +118,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
     
+    // Get the column mapping if provided
+    let columnMapping: Record<string, string> = {};
+    const mappingStr = formData.get('columnMapping') as string;
+    
+    if (mappingStr) {
+      try {
+        columnMapping = JSON.parse(mappingStr);
+        console.log('Column mapping received:', columnMapping);
+      } catch (e) {
+        console.error('Error parsing column mapping:', e);
+        // Continue with empty mapping if parsing fails
+      }
+    }
+    
     // Get the filename to use as source
     const fileName = file.name;
     const source = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'CSV Import'; // Remove file extension
@@ -150,20 +164,67 @@ export async function POST(req: NextRequest) {
           strict: true
         }))
         .on('data', (record: any) => {
-          // Validate the record has the required fields
-          console.log('CSV row:', record); // Log each record for debugging
-          if (record.name && record.phone) {
-            results.push({
-              user_id: userId,
-              name: record.name,
-              phone: record.phone,
-              email: record.email || null,
-              status: record.status || 'New Lead',
-              source: record.source || source, // Use filename as source, fallback to record.source if it exists
-              created_at: new Date().toISOString()
-            });
+          // Map the record using column mapping
+          const mappedRecord: any = { user_id: userId };
+          let hasRequiredFields = true;
+          
+          // Check if we have mapping for required field (phone)
+          if (columnMapping.phone) {
+            // Get the value using the mapped column name
+            const phone = record[columnMapping.phone];
+            
+            if (!phone) {
+              hasRequiredFields = false;
+            } else {
+              mappedRecord.phone = phone;
+            }
           } else {
-            console.log('Invalid record - missing name or phone:', record);
+            // Fall back to direct column name if no mapping
+            if (!record.phone) {
+              hasRequiredFields = false;
+            } else {
+              mappedRecord.phone = record.phone;
+            }
+          }
+          
+          if (hasRequiredFields) {
+            // Add optional fields if they are in the mapping
+            const optionalFields = [
+              'name', 'email', 'title', 'first_name', 'last_name', 
+              'city', 'company_name'
+            ];
+            
+            optionalFields.forEach(field => {
+              if (columnMapping[field] && record[columnMapping[field]]) {
+                mappedRecord[field] = record[columnMapping[field]];
+              } else if (record[field]) {
+                // Fall back to direct column name
+                mappedRecord[field] = record[field];
+              }
+            });
+            
+            // Set required defaults
+            if (!mappedRecord.name) {
+              // Generate name from first_name and last_name if available
+              if (mappedRecord.first_name || mappedRecord.last_name) {
+                mappedRecord.name = [mappedRecord.first_name, mappedRecord.last_name]
+                  .filter(Boolean)
+                  .join(' ');
+              } else {
+                // Use phone number as name if nothing else is available
+                mappedRecord.name = `Lead (${mappedRecord.phone})`;
+              }
+            }
+            
+            // Always set these fields automatically
+            mappedRecord.status = 'New Lead';
+            mappedRecord.source = source;
+            mappedRecord.created_at = new Date().toISOString();
+            
+            results.push(mappedRecord);
+            console.log('Mapped record:', mappedRecord);
+          } else {
+            console.log('Invalid record - missing required phone field:', record);
           }
         })
         .on('end', () => resolve())
@@ -171,7 +232,9 @@ export async function POST(req: NextRequest) {
     });
     
     if (results.length === 0) {
-      return NextResponse.json({ error: 'No valid records found in CSV' }, { status: 400 });
+      return NextResponse.json({ 
+        error: 'No valid records found in CSV. Please ensure your file contains the required fields and data.'
+      }, { status: 400 });
     }
     
     console.log(`Inserting ${results.length} leads into database`);

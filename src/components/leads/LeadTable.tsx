@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Trash2, PenLine, PhoneOutgoing } from 'lucide-react';
+import { Trash2, PenLine, PhoneOutgoing, ChevronDown, ChevronUp, Building, Map, User } from 'lucide-react';
 import {
   Flex,
   Button,
@@ -12,7 +12,9 @@ import {
   DialogTitle,
   Text,
   Badge,
-  Muted
+  Muted,
+  Card,
+  CardContent
 } from '@/components/ui';
 import { Lead } from '@/types/leads';
 import Link from 'next/link';
@@ -36,6 +38,7 @@ const LeadTable: React.FC<LeadTableProps> = ({
 }) => {
   const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   // Function to handle opening delete confirmation dialog
   const handleConfirmDelete = (id: string) => {
@@ -56,6 +59,16 @@ const LeadTable: React.FC<LeadTableProps> = ({
   // Helper function to format date
   const formatDate = (date: string) => {
     return new Date(date).toLocaleDateString();
+  };
+
+  // Function to toggle row expansion
+  const toggleRowExpand = (id: string) => {
+    setExpandedRow(expandedRow === id ? null : id);
+  };
+
+  // Check if lead has additional details
+  const hasAdditionalDetails = (lead: Lead) => {
+    return lead.title || lead.first_name || lead.last_name || lead.city || lead.company_name;
   };
 
   return (
@@ -98,78 +111,144 @@ const LeadTable: React.FC<LeadTableProps> = ({
             </tr>
           ) : (
             filteredLeads.map((lead) => (
-              <tr 
-                key={lead.id} 
-                className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
-              >
-                <td className="py-3 px-4">
-                  <Flex align="center" gap="sm">
-                    <div className="h-9 w-9 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center">
-                      {lead.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <Text className="font-medium text-gray-800">{lead.name}</Text>
-                      <Muted className="text-xs">{lead.email}</Muted>
-                    </div>
-                  </Flex>
-                </td>
-                <td className="py-3 px-4">
-                  <Text className="text-gray-800">{lead.phone}</Text>
-                </td>
-                <td className="py-3 px-4">
-                  <Badge 
-                    className={`${
-                      lead.status === 'New' ? 'bg-blue-100 text-blue-800' :
-                      lead.status === 'Contacted' ? 'bg-yellow-100 text-yellow-800' :
-                      lead.status === 'Qualified' ? 'bg-green-100 text-green-800' :
-                      lead.status === 'Converted' ? 'bg-purple-100 text-purple-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}
-                  >
-                    {lead.status}
-                  </Badge>
-                </td>
-                <td className="py-3 px-4">
-                  <Text className="text-gray-800">
-                    {formatDate(lead.created_at)}
-                  </Text>
-                </td>
-                <td className="py-3 px-4 text-right">
-                  <div className="flex justify-end items-center gap-2">
-                    <Link href={`/leads/${lead.id}/edit`} passHref>
-                      <Button 
-                        variant="ghost" 
-                        size="icon"
-                        className="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity"
-                        aria-label="Edit lead"
-                      >
-                        <PenLine size={16} />
-                      </Button>
-                    </Link>
-                    
-                    <Link href={`tel:${lead.phone}`} passHref>
-                      <Button 
-                        variant="ghost" 
-                        size="icon"
-                        className="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity"
-                        aria-label="Call lead"
-                      >
-                        <PhoneOutgoing size={16} />
-                      </Button>
-                    </Link>
-                    
-                    <Button 
-                      variant="ghost" 
-                      size="icon"
-                      className="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity text-red-600"
-                      aria-label="Delete lead"
-                      onClick={() => handleConfirmDelete(lead.id)}
+              <React.Fragment key={lead.id}>
+                <tr 
+                  className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                >
+                  <td className="py-3 px-4">
+                    <Flex align="center" gap="sm">
+                      <div className="h-9 w-9 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center">
+                        {lead.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <Text className="font-medium text-gray-800">{lead.name}</Text>
+                        <Muted className="text-xs">{lead.email}</Muted>
+                      </div>
+                      {hasAdditionalDetails(lead) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1 text-gray-500 hover:text-gray-700"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleRowExpand(lead.id);
+                          }}
+                        >
+                          {expandedRow === lead.id ? (
+                            <ChevronUp size={16} />
+                          ) : (
+                            <ChevronDown size={16} />
+                          )}
+                        </Button>
+                      )}
+                    </Flex>
+                  </td>
+                  <td className="py-3 px-4">
+                    <Text className="text-gray-800">{lead.phone}</Text>
+                  </td>
+                  <td className="py-3 px-4">
+                    <Badge 
+                      className={`${
+                        lead.status === 'New Lead' ? 'bg-blue-100 text-blue-800' :
+                        lead.status === 'Contacted' ? 'bg-yellow-100 text-yellow-800' :
+                        lead.status === 'Qualified' ? 'bg-green-100 text-green-800' :
+                        lead.status === 'Converted' ? 'bg-purple-100 text-purple-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}
                     >
-                      <Trash2 size={16} />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
+                      {lead.status}
+                    </Badge>
+                  </td>
+                  <td className="py-3 px-4">
+                    <Text className="text-gray-800">
+                      {formatDate(lead.created_at)}
+                    </Text>
+                  </td>
+                  <td className="py-3 px-4 text-right">
+                    <div className="flex justify-end items-center gap-2">
+                      <Link href={`/leads/${lead.id}/edit`} passHref>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity"
+                          aria-label="Edit lead"
+                        >
+                          <PenLine size={16} />
+                        </Button>
+                      </Link>
+                      
+                      <Link href={`tel:${lead.phone}`} passHref>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity"
+                          aria-label="Call lead"
+                        >
+                          <PhoneOutgoing size={16} />
+                        </Button>
+                      </Link>
+                      
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        className="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity text-red-600"
+                        aria-label="Delete lead"
+                        onClick={() => handleConfirmDelete(lead.id)}
+                      >
+                        <Trash2 size={16} />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+
+                {/* Expanded details row */}
+                {expandedRow === lead.id && hasAdditionalDetails(lead) && (
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <td colSpan={5} className="py-2 px-4">
+                      <Card className="border-0 shadow-none bg-transparent">
+                        <CardContent className="p-2">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            {(lead.first_name || lead.last_name) && (
+                              <div className="flex items-center gap-2">
+                                <User size={16} className="text-gray-500" />
+                                <div>
+                                  <Text className="text-sm text-gray-500">Full Name</Text>
+                                  <Text className="text-sm font-medium">
+                                    {[lead.title, lead.first_name, lead.last_name]
+                                      .filter(Boolean)
+                                      .join(' ')}
+                                  </Text>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {lead.company_name && (
+                              <div className="flex items-center gap-2">
+                                <Building size={16} className="text-gray-500" />
+                                <div>
+                                  <Text className="text-sm text-gray-500">Company</Text>
+                                  <Text className="text-sm font-medium">{lead.company_name}</Text>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {lead.city && (
+                              <div className="flex items-center gap-2">
+                                <Map size={16} className="text-gray-500" />
+                                <div>
+                                  <Text className="text-sm text-gray-500">City</Text>
+                                  <Text className="text-sm font-medium">{lead.city}</Text>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))
           )}
         </tbody>

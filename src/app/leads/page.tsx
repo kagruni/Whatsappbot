@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import supabase from '@/lib/supabase';
 import DashboardLayout from '@/components/DashboardLayout';
-import { LeadTableCard, AddLeadDialog } from '@/components/leads';
+import { LeadTableCard, AddLeadDialog, CSVColumnMapper } from '@/components/leads';
 import LeadManagementControls from '@/components/leads/LeadManagementControls';
 import { Lead } from '@/types/leads';
 import { motion } from 'framer-motion';
@@ -63,6 +63,11 @@ export default function LeadsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddLeadDialogOpen, setIsAddLeadDialogOpen] = useState(false);
+  
+  // CSV mapping state
+  const [selectedCSVFile, setSelectedCSVFile] = useState<File | null>(null);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [isColumnMapperOpen, setIsColumnMapperOpen] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -145,7 +150,8 @@ export default function LeadsPage() {
   const uniqueStatuses = Array.from(new Set(leads.map(lead => lead.status)));
   const uniqueSources = Array.from(new Set(leads.map(lead => lead.source)));
   
-  const handleCSVUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle file selection
+  const handleFileSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     
@@ -155,26 +161,60 @@ export default function LeadsPage() {
       return;
     }
     
+    try {
+      setSelectedCSVFile(file);
+      
+      // Read the first line to get headers
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        if (!content) return;
+        
+        // Get the first line
+        const firstLine = content.split('\n')[0];
+        
+        // Determine if semicolon or comma is used as separator
+        const separator = firstLine.includes(';') ? ';' : ',';
+        
+        // Split the headers and remove quotes if present
+        const headers = firstLine.split(separator).map(header => 
+          header.trim().replace(/^["'](.*)["']$/, '$1')
+        );
+        
+        setCsvHeaders(headers);
+        setIsColumnMapperOpen(true);
+      };
+      
+      reader.readAsText(file);
+    } catch (error: any) {
+      console.error('Error reading CSV file:', error);
+      toast.error('Error reading CSV file: ' + (error.message || 'Unknown error'));
+    }
+  };
+  
+  // Process CSV upload with column mapping
+  const handleColumnMappingConfirm = async (columnMapping: Record<string, string>) => {
+    if (!selectedCSVFile || !user) return;
+    
     setIsUploadingCSV(true);
     
-    // Get current session for authentication
-    const { data } = await supabase.auth.getSession();
-    console.log('Session data:', data); // Debug session
-    const accessToken = data.session?.access_token;
-    
-    if (!accessToken) {
-      toast.error('Authentication error: No valid session token found. Please log in again.');
-      setIsUploadingCSV(false);
-      return;
-    }
-    
-    console.log('Token obtained:', accessToken.substring(0, 10) + '...'); // Log partial token for debugging
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    
     try {
-      console.log('Sending request with auth token...');
+      // Get current session for authentication
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      
+      if (!accessToken) {
+        toast.error('Authentication error: No valid session token found. Please log in again.');
+        setIsUploadingCSV(false);
+        return;
+      }
+      
+      const formData = new FormData();
+      formData.append('file', selectedCSVFile);
+      
+      // Add column mapping to form data
+      formData.append('columnMapping', JSON.stringify(columnMapping));
+      
       const response = await fetch('/api/leads', {
         method: 'POST',
         headers: {
@@ -183,30 +223,22 @@ export default function LeadsPage() {
         body: formData,
       });
       
-      console.log('Response status:', response.status);
       const result = await response.json();
-      console.log('Response body:', result);
       
       if (!response.ok) {
         const errorMessage = result.error || 'Failed to upload CSV';
-        
-        // Show a more user-friendly error for common issues
-        if (errorMessage === 'No valid records found in CSV') {
-          throw new Error(
-            'No valid records found in the CSV. Please ensure your file contains at least a "name" and "phone" column with data.'
-          );
-        } else {
-          throw new Error(errorMessage);
-        }
+        throw new Error(errorMessage);
       }
       
       toast.success(result.message || 'CSV uploaded successfully');
       fetchLeads(); // Refresh leads list
+      setIsColumnMapperOpen(false);
     } catch (error: any) {
       console.error('CSV upload error details:', error);
       toast.error(error.message || 'Failed to upload CSV');
     } finally {
       setIsUploadingCSV(false);
+      setSelectedCSVFile(null);
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -281,7 +313,7 @@ export default function LeadsPage() {
             uniqueStatuses={uniqueStatuses}
             uniqueSources={uniqueSources}
             isUploadingCSV={isUploadingCSV}
-            handleCSVUpload={handleCSVUpload}
+            handleCSVUpload={handleFileSelection}  // Updated to use new file selection handler
             openAddLeadDialog={() => setIsAddLeadDialogOpen(true)}
           />
 
@@ -331,6 +363,15 @@ export default function LeadsPage() {
         onLeadAdded={fetchLeads} 
         isOpen={isAddLeadDialogOpen}
         setIsOpen={setIsAddLeadDialogOpen}
+      />
+      
+      {/* CSV Column Mapper Dialog */}
+      <CSVColumnMapper
+        isOpen={isColumnMapperOpen}
+        setIsOpen={setIsColumnMapperOpen}
+        csvHeaders={csvHeaders}
+        onColumnsMapConfirm={handleColumnMappingConfirm}
+        isProcessing={isUploadingCSV}
       />
     </DashboardLayout>
   );
