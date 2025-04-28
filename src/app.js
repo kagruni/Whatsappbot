@@ -1,6 +1,7 @@
 const express = require('express');
 const app = express();
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 const axios = require('axios');
 const OpenAI = require('openai');
 const config = require('./config');
@@ -11,10 +12,13 @@ const path = require('path');
 const cron = require('node-cron');
 const { exec } = require('child_process');
 const crypto = require('crypto');
+const userSettings = require('./userSettings');
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY // This key should be in your .env file
-});
+// Remove the global OpenAI instance as we'll use per-user instances
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY // This key should be in your .env file
+// });
+
 const PORT = process.env.PORT || 3000;
 const STATUS_FILE_PATH = path.join(__dirname, '..', 'lead_status.json');
 const leadInfo = new Map();
@@ -47,7 +51,12 @@ const server = app.listen(PORT, async () => {
       whatsappVerifyToken: config.whatsappVerifyToken
     }
   );
+  
   try {
+    // Initialize user settings
+    await userSettings.init();
+    console.log('User settings initialized');
+    
     // Load leads from CSV
     leads = await loadLeadsFromCSV('../leads.csv');
     if (leads.length === 0) {
@@ -136,10 +145,56 @@ function markLeadAsContacted(phone, status = 'contacted') {
   }
 }
 
-function loadLeadsFromCSV(filePath) {
+// Function to load user assignments for leads
+function loadLeadUserAssignments(filePath) {
   return new Promise((resolve, reject) => {
+    const assignments = new Map();
+    
+    try {
+      if (!fs.existsSync(path.resolve(__dirname, filePath))) {
+        console.log('No lead user assignments file found. All leads will use the admin user.');
+        return resolve(assignments);
+      }
+      
+      fs.createReadStream(path.resolve(__dirname, filePath))
+        .pipe(csv({ separator: ';', headers: ['phone', 'userId'] }))
+        .on('data', (data) => {
+          let { phone, userId } = data;
+          
+          if (phone && userId) {
+            phone = phone.replace(/\D/g, '');
+            if (phone.length > 0) {
+              assignments.set(phone, userId);
+            } else {
+              console.warn('Skipping assignment with invalid phone number:', { phone, userId });
+            }
+          } else {
+            console.warn('Skipping invalid assignment:', data);
+          }
+        })
+        .on('end', () => {
+          console.log(`Loaded ${assignments.size} lead user assignments`);
+          resolve(assignments);
+        })
+        .on('error', (error) => {
+          console.error('Error reading assignments CSV:', error);
+          reject(error);
+        });
+    } catch (error) {
+      console.error('Error in loadLeadUserAssignments:', error);
+      resolve(assignments); // Return empty assignments on error
+    }
+  });
+}
+
+// Modify the loadLeadsFromCSV function to include userId assignments
+function loadLeadsFromCSV(filePath) {
+  return new Promise(async (resolve, reject) => {
     const results = [];
     const leadStatus = loadLeadStatus();
+    
+    // Load user assignments
+    const userAssignments = await loadLeadUserAssignments('../lead_assignments.csv');
     
     fs.createReadStream(path.resolve(__dirname, filePath))
       .pipe(csv({ separator: ';', headers: ['name', 'phone'] }))
@@ -149,8 +204,11 @@ function loadLeadsFromCSV(filePath) {
         if (name && phone) {
           phone = phone.replace(/\D/g, '');
           if (phone.length > 0 && !leadStatus[phone]?.contacted) {
-            results.push({ name, phone });
-            leadInfo.set(phone, { name }); // Store lead info
+            // Get the assigned user ID for this lead, or default to admin
+            const userId = userAssignments.get(phone) || 'admin';
+            
+            results.push({ name, phone, userId });
+            leadInfo.set(phone, { name, userId }); // Store lead info with userId
           } else if (leadStatus[phone]?.contacted) {
             console.log(`Skipping previously contacted lead: ${name} (${phone})`);
           } else {
@@ -229,11 +287,15 @@ async function initiateBatch(batch) {
       const phoneNumber = lead.phone.replace(/\D/g, '');
       console.log(`Attempting to send message to ${lead.name} (${phoneNumber})`);
 
+      // Get the responsible user for this lead (you might need to implement logic to assign leads to users)
+      const userId = lead.userId || 'admin'; // Default to admin if not specified
+      console.log(`Using user ${userId} for sending message to ${lead.name} (${phoneNumber})`);
+
       // Mark as contacted before sending the message
       await markLeadAsContacted(phoneNumber, 'initiated');
       console.log(`Marked ${lead.name} (${phoneNumber}) as contacted (initiated)`);
 
-      const messageId = await sendWhatsAppTemplateMessage(phoneNumber, [
+      const messageId = await sendWhatsAppTemplateMessageForUser(userId, phoneNumber, [
         {
           type: 'body',
           parameters: [
@@ -353,29 +415,50 @@ function normalizePhoneNumber(phone) {
 
 async function handleMessage(message) {
   console.log('Processing message:', JSON.stringify(message, null, 2));
-  const userId = normalizePhoneNumber(message.from);
+  const phoneNumber = normalizePhoneNumber(message.from);
   const userMessage = message.text.body;
 
   try {
-    const lead = leadInfo.get(userId) || { name: 'WhatsApp User' };
-    let userHistory = conversationHistory.get(userId) || [];
+    // Get lead info including the assigned userId if available
+    const leadData = leadInfo.get(phoneNumber) || { name: 'WhatsApp User' };
+    
+    // Use assigned userId from lead info if available, otherwise try to resolve from phone
+    let userId = leadData.userId;
+    if (!userId) {
+      userId = await userSettings.getUserIdByPhone(phoneNumber);
+      console.log(`Resolved phone ${phoneNumber} to user ${userId} from phone mapping`);
+    } else {
+      console.log(`Using assigned user ${userId} for phone ${phoneNumber} from lead info`);
+    }
+    
+    let userHistory = conversationHistory.get(phoneNumber) || [];
 
     userHistory.push({ role: "user", content: userMessage });
     userHistory = userHistory.slice(-10); // Keep last 10 messages
 
-    const aiResponse = await generateAIResponse(userHistory);
+    // Get user-specific system prompt
+    const systemPrompt = await userSettings.getSystemPromptForUser(userId);
+    
+    // Get user-specific OpenAI instance and model
+    const openai = await userSettings.getOpenAIForUser(userId);
+    const model = await userSettings.getOpenAIModel(userId);
+    
+    // Generate AI response using user-specific settings
+    const aiResponse = await generateAIResponseForUser(userHistory, systemPrompt, openai, model);
+    
     userHistory.push({ role: "assistant", content: aiResponse });
-    conversationHistory.set(userId, userHistory);
+    conversationHistory.set(phoneNumber, userHistory);
 
-    await sendWhatsAppMessage(userId, aiResponse);
-    await markLeadAsContacted(userId);
+    // Send WhatsApp message using user-specific settings
+    await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse);
+    await markLeadAsContacted(phoneNumber);
 
-    let card = await findCardForLead(userId);
+    let card = await findCardForLead(phoneNumber);
     if (!card) {
-      console.log(`No existing card found for ${userId}. Creating new card.`);
-      card = await createCardForLead(userId, lead.name);
+      console.log(`No existing card found for ${phoneNumber}. Creating new card.`);
+      card = await createCardForLead(phoneNumber, leadData.name);
     } else {
-      console.log(`Existing card found for ${userId}. Updating conversation.`);
+      console.log(`Existing card found for ${phoneNumber}. Updating conversation.`);
     }
 
     if (card) {
@@ -389,7 +472,7 @@ async function handleMessage(message) {
         console.log(`No trigger words detected. Card remains in current list.`);
       }
     } else {
-      console.error('Failed to find or create card for lead:', userId);
+      console.error('Failed to find or create card for lead:', phoneNumber);
     }
 
     console.log('Message handling completed successfully');
@@ -398,11 +481,11 @@ async function handleMessage(message) {
   }
 }
 
-async function findCardForLead(userId) {
+async function findCardForLead(phoneNumber) {
   return null;
 }
 
-async function createCardForLead(userId, name) {
+async function createCardForLead(phoneNumber, name) {
   return null;
 }
 
@@ -429,20 +512,29 @@ function isLeadInterested(userMessage, aiResponse) {
   return false;
 }
 
-async function generateAIResponse(userHistory) {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: SYSTEM_MESSAGE },
-      ...userHistory
-    ],
-    max_tokens: 150
-  });
-  return response.choices[0].message.content.trim();
+async function generateAIResponseForUser(userHistory, systemPrompt, openai, model) {
+  try {
+    const response = await openai.chat.completions.create({
+      model: model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...userHistory
+      ],
+      max_tokens: 150
+    });
+    return response.choices[0].message.content.trim();
+  } catch (error) {
+    console.error('Error generating AI response:', error);
+    // Fallback to a safe response if there's an error
+    return "Thank you for your message. I'm having trouble processing that right now. Please try again in a moment.";
+  }
 }
 
-async function sendWhatsAppMessage(to, message) {
-  const url = `https://graph.facebook.com/v16.0/${config.whatsappPhoneNumberId}/messages`;
+async function sendWhatsAppMessageForUser(userId, to, message) {
+  const phoneNumberId = await userSettings.getWhatsAppPhoneNumberId(userId);
+  const token = await userSettings.getWhatsAppToken(userId);
+  
+  const url = `https://graph.facebook.com/v16.0/${phoneNumberId}/messages`;
 
   try {
     const response = await axios.post(
@@ -457,7 +549,7 @@ async function sendWhatsAppMessage(to, message) {
       },
       {
         headers: {
-          'Authorization': `Bearer ${config.whatsappToken}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       }
@@ -468,23 +560,28 @@ async function sendWhatsAppMessage(to, message) {
   }
 }
 
-async function sendWhatsAppTemplateMessage(to, components, imageUrl) {
+async function sendWhatsAppTemplateMessageForUser(userId, to, components, imageUrl) {
   if (!to) {
     throw new Error('Recipient phone number is required');
   }
 
   const formattedNumber = to.startsWith('49') ? to : `49${to}`;
+  
+  // Get user-specific settings
+  const phoneNumberId = await userSettings.getWhatsAppPhoneNumberId(userId);
+  const token = await userSettings.getWhatsAppToken(userId);
+  const templateId = await userSettings.getTemplateId(userId);
 
   try {
-    console.log(`Sending template message to ${formattedNumber}: opener2`);
+    console.log(`Sending template message to ${formattedNumber}: ${templateId}`);
     const response = await axios.post(
-      `https://graph.facebook.com/v20.0/${config.whatsappPhoneNumberId}/messages`,
+      `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
         to: formattedNumber,
         type: 'template',
         template: {
-          name: 'opener2',
+          name: templateId,
           language: { code: 'en' },
           components: [
             {
@@ -504,7 +601,7 @@ async function sendWhatsAppTemplateMessage(to, components, imageUrl) {
       },
       {
         headers: {
-          'Authorization': `Bearer ${config.whatsappToken}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       }
@@ -842,3 +939,169 @@ function logMessage(message, level = 'info') {
     if (err) console.error('Error writing to log file:', err);
   });
 }
+
+// Modified for backward compatibility
+async function generateAIResponse(userHistory) {
+  // Default to admin user
+  const userId = 'admin';
+  const systemPrompt = await userSettings.getSystemPromptForUser(userId);
+  const openai = await userSettings.getOpenAIForUser(userId);
+  const model = await userSettings.getOpenAIModel(userId);
+  
+  return generateAIResponseForUser(userHistory, systemPrompt, openai, model);
+}
+
+// Modified for backward compatibility
+async function sendWhatsAppMessage(to, message) {
+  // Default to admin user
+  const userId = 'admin';
+  return sendWhatsAppMessageForUser(userId, to, message);
+}
+
+// Modified for backward compatibility
+async function sendWhatsAppTemplateMessage(to, components, imageUrl) {
+  // Default to admin user
+  const userId = 'admin';
+  return sendWhatsAppTemplateMessageForUser(userId, to, components, imageUrl);
+}
+
+// Get current user settings
+app.get('/api/settings/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    // Basic authentication (replace with proper auth in production)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.API_SECRET_KEY}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const settings = await userSettings.getUserSettings(userId);
+    
+    // Mask API keys for security
+    if (settings.openaiApiKey) {
+      settings.openaiApiKey = `${settings.openaiApiKey.substring(0, 3)}...${settings.openaiApiKey.substring(settings.openaiApiKey.length - 4)}`;
+    }
+    if (settings.whatsappToken) {
+      settings.whatsappToken = `${settings.whatsappToken.substring(0, 3)}...${settings.whatsappToken.substring(settings.whatsappToken.length - 4)}`;
+    }
+    
+    res.json(settings);
+  } catch (error) {
+    console.error('Error getting user settings:', error);
+    res.status(500).json({ error: 'Failed to get user settings' });
+  }
+});
+
+// Update user settings
+app.post('/api/settings/:userId', express.json(), async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    // Basic authentication (replace with proper auth in production)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.API_SECRET_KEY}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const newSettings = req.body;
+    
+    // Validate required fields
+    const updatedSettings = await userSettings.updateUserSettings(userId, newSettings);
+    
+    // Mask API keys for security in the response
+    if (updatedSettings.openaiApiKey) {
+      updatedSettings.openaiApiKey = `${updatedSettings.openaiApiKey.substring(0, 3)}...${updatedSettings.openaiApiKey.substring(updatedSettings.openaiApiKey.length - 4)}`;
+    }
+    if (updatedSettings.whatsappToken) {
+      updatedSettings.whatsappToken = `${updatedSettings.whatsappToken.substring(0, 3)}...${updatedSettings.whatsappToken.substring(updatedSettings.whatsappToken.length - 4)}`;
+    }
+    
+    res.json(updatedSettings);
+  } catch (error) {
+    console.error('Error updating user settings:', error);
+    res.status(500).json({ error: 'Failed to update user settings' });
+  }
+});
+
+// Create new user
+app.post('/api/users', express.json(), async (req, res) => {
+  try {
+    // Basic authentication (replace with proper auth in production)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.API_SECRET_KEY}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const { userId, ...settings } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+    
+    const newUser = await require('./database').createUser(userId, settings);
+    
+    // Mask API keys for security in the response
+    if (newUser.openaiApiKey) {
+      newUser.openaiApiKey = `${newUser.openaiApiKey.substring(0, 3)}...${newUser.openaiApiKey.substring(newUser.openaiApiKey.length - 4)}`;
+    }
+    if (newUser.whatsappToken) {
+      newUser.whatsappToken = `${newUser.whatsappToken.substring(0, 3)}...${newUser.whatsappToken.substring(newUser.whatsappToken.length - 4)}`;
+    }
+    
+    res.status(201).json(newUser);
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+// List all users
+app.get('/api/users', async (req, res) => {
+  try {
+    // Basic authentication (replace with proper auth in production)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.API_SECRET_KEY}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const data = await fs.promises.readFile(path.join(__dirname, '..', 'user_settings.json'), 'utf8');
+    const settings = JSON.parse(data);
+    
+    // Create a sanitized version without sensitive data
+    const userList = Object.keys(settings).map(userId => {
+      const user = settings[userId];
+      return {
+        userId: user.userId,
+        whatsappPhoneNumberId: user.whatsappPhoneNumberId,
+        templateId: user.templateId,
+        openaiModel: user.openaiModel,
+      };
+    });
+    
+    res.json(userList);
+  } catch (error) {
+    console.error('Error listing users:', error);
+    res.status(500).json({ error: 'Failed to list users' });
+  }
+});
+
+// Delete a user
+app.delete('/api/users/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    // Basic authentication (replace with proper auth in production)
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.API_SECRET_KEY}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    await require('./database').deleteUser(userId);
+    
+    res.json({ success: true, message: `User ${userId} deleted successfully` });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});

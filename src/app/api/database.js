@@ -1,9 +1,9 @@
-const fs = require('fs').promises;
-const path = require('path');
-const crypto = require('crypto');
+import fs from 'fs/promises';
+import path from 'path';
+import crypto from 'crypto';
 
 // Path to the user settings file
-const USER_SETTINGS_PATH = path.join(__dirname, '..', 'user_settings.json');
+const USER_SETTINGS_PATH = path.join(process.cwd(), 'user_settings.json');
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -199,11 +199,11 @@ async function getUserIdByPhone(phoneNumber) {
   }
 }
 
-module.exports = {
+export default {
   initUserSettings,
   getUserSettings,
   updateUserSettings,
   createUser,
   deleteUser,
   getUserIdByPhone,
-};
+}; 

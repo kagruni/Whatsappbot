@@ -5,6 +5,14 @@ import * as SupabaseSSR from '@supabase/ssr';
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
   
+  // Get the pathname from the URL
+  const pathname = req.nextUrl.pathname;
+  
+  // Bypass authentication checks for the webhook route
+  if (pathname === '/api/webhook') {
+    return res;
+  }
+  
   // Create a Supabase client
   const supabase = SupabaseSSR.createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -33,9 +41,6 @@ export async function middleware(req: NextRequest) {
   // Check if the user is authenticated
   const { data: { session } } = await supabase.auth.getSession();
   
-  // Get the pathname from the URL
-  const pathname = req.nextUrl.pathname;
-  
   // Define public routes that don't require authentication
   const publicRoutes = ['/login', '/register', '/forgot-password', '/reset-password'];
   const isPublicRoute = publicRoutes.includes(pathname);
@@ -59,6 +64,6 @@ export async function middleware(req: NextRequest) {
 // Specify which routes this middleware should run on
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico).*)'
   ],
 }; 
