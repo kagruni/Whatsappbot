@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { motion } from 'framer-motion';
 import { 
@@ -31,9 +31,12 @@ import {
 import { 
   Save as SaveIcon, 
   RefreshCw as RefreshIcon,
-  Check as CheckIcon 
+  Check as CheckIcon,
+  AlertCircle as AlertIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getUserSettings, saveUserSettings } from '@/lib/supabase/user-settings';
+import { useAuth } from '@/context/AuthContext';
 
 // Animation variants
 const pageVariants = {
@@ -79,29 +82,93 @@ const buttonVariants = {
 };
 
 export default function SettingsPage() {
+  const { user, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState("whatsapp");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   
-  // Mock settings
-  const [whatsappToken, setWhatsappToken] = useState('••••••••••••••••••••••••••••••');
-  const [whatsappPhoneId, setWhatsappPhoneId] = useState('1234567890123456');
-  const [verifyToken, setVerifyToken] = useState('custom_verify_token_123');
-  
-  const [openaiKey, setOpenaiKey] = useState('••••••••••••••••••••••••••••••');
-  const [aiModel, setAiModel] = useState('gpt-3.5-turbo');
-  const [systemPrompt, setSystemPrompt] = useState(`You are an AI assistant for a WhatsApp business account. Your role is to:
-1. Provide helpful and concise information about the company's products and services.
-2. Answer customer queries politely and professionally.
-3. Escalate complex issues to human support when necessary.
-4. Understand and respond to specific commands like 'help', 'products', or 'contact'.
-Always maintain a friendly and professional tone.`);
+  // Settings state
+  const [whatsappToken, setWhatsappToken] = useState('');
+  const [whatsappPhoneId, setWhatsappPhoneId] = useState('');
+  const [whatsappTemplateId, setWhatsappTemplateId] = useState('');
+  const [verifyToken, setVerifyToken] = useState('');
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [aiModel, setAiModel] = useState('gpt-4.1-mini');
+  const [systemPrompt, setSystemPrompt] = useState('');
 
-  const saveWhatsAppSettings = () => {
-    // In a real application, this would send the data to your backend
-    toast.success('WhatsApp settings saved successfully');
+  useEffect(() => {
+    // Load environment variables for fixed values
+    setWhatsappToken(process.env.NEXT_PUBLIC_WHATSAPP_TOKEN_MASK || '••••••••••••••••••••••••••••••');
+    setVerifyToken(process.env.NEXT_PUBLIC_WHATSAPP_VERIFY_TOKEN_MASK || '••••••••••••••••••••••••••••••');
+    
+    if (user) {
+      loadUserSettings();
+    } else if (!authLoading) {
+      setLoading(false);
+    }
+  }, [user, authLoading]);
+  
+  const loadUserSettings = async () => {
+    try {
+      setLoading(true);
+      const settings = await getUserSettings();
+      
+      if (settings) {
+        setWhatsappPhoneId(settings.whatsapp_phone_id || '');
+        setWhatsappTemplateId(settings.whatsapp_template_id || '');
+        setOpenaiKey(settings.openai_api_key ? '••••••••••••••••••••••••••••••' : '');
+        setAiModel(settings.ai_model || 'gpt-4.1-mini');
+        setSystemPrompt(settings.system_prompt || '');
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+      toast.error('Failed to load settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveWhatsAppSettings = async () => {
+    if (!user) {
+      toast.error('You must be signed in to save settings');
+      return;
+    }
+    
+    try {
+      setSaving(true);
+      await saveUserSettings({
+        whatsapp_phone_id: whatsappPhoneId,
+        whatsapp_template_id: whatsappTemplateId
+      });
+      toast.success('WhatsApp settings saved successfully');
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
   
-  const saveAISettings = () => {
-    toast.success('AI settings saved successfully');
+  const saveAISettings = async () => {
+    if (!user) {
+      toast.error('You must be signed in to save settings');
+      return;
+    }
+    
+    try {
+      setSaving(true);
+      await saveUserSettings({
+        openai_api_key: openaiKey === '••••••••••••••••••••••••••••••' ? undefined : openaiKey,
+        ai_model: aiModel,
+        system_prompt: systemPrompt
+      });
+      toast.success('AI settings saved successfully');
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const testWhatsAppConnection = () => {
@@ -111,6 +178,39 @@ Always maintain a friendly and professional tone.`);
       toast.success('WhatsApp connection successful');
     }, 2000);
   };
+
+  if (authLoading || loading) {
+    return (
+      <DashboardLayout>
+        <Container className="p-6 max-w-7xl">
+          <Flex justify="center" align="center" className="h-64">
+            <RefreshIcon className="h-8 w-8 animate-spin text-gray-400" />
+          </Flex>
+        </Container>
+      </DashboardLayout>
+    );
+  }
+
+  if (!user) {
+    return (
+      <DashboardLayout>
+        <Container className="p-6 max-w-7xl">
+          <Card className="border border-gray-200 shadow-sm">
+            <CardContent className="p-6">
+              <Flex direction="column" align="center" gap="md" className="text-center">
+                <AlertIcon className="h-12 w-12 text-amber-500 mb-2" />
+                <H1 className="text-2xl font-semibold text-gray-800">Authentication Required</H1>
+                <P className="text-gray-600 mb-4">You need to be signed in to view and manage your settings.</P>
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                  Sign In
+                </Button>
+              </Flex>
+            </CardContent>
+          </Card>
+        </Container>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -173,13 +273,15 @@ Always maintain a friendly and professional tone.`);
                       <Flex direction="column" gap="md" className="space-y-4 mt-2">
                         <motion.div variants={itemVariants}>
                           <div>
-                            <Label className="text-gray-700 mb-1.5 block">WhatsApp Token</Label>
+                            <Label className="text-gray-700 mb-1.5 block">WhatsApp Token (System-wide)</Label>
                             <Input 
-                              placeholder="Enter your WhatsApp API token" 
                               value={whatsappToken}
-                              onChange={(e) => setWhatsappToken(e.target.value)}
-                              className="border-gray-200 text-gray-800"
+                              disabled
+                              className="border-gray-200 text-gray-500 bg-gray-50"
                             />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              This token is managed at the system level and cannot be changed by users
+                            </Text>
                           </div>
                         </motion.div>
                         
@@ -192,20 +294,37 @@ Always maintain a friendly and professional tone.`);
                               onChange={(e) => setWhatsappPhoneId(e.target.value)}
                               className="border-gray-200 text-gray-800"
                             />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              Your unique WhatsApp Phone Number ID from the Meta Developer Portal
+                            </Text>
                           </div>
                         </motion.div>
                         
                         <motion.div variants={itemVariants}>
                           <div>
-                            <Label className="text-gray-700 mb-1.5 block">Verify Token</Label>
+                            <Label className="text-gray-700 mb-1.5 block">WhatsApp Template ID</Label>
                             <Input 
-                              placeholder="Enter your custom verify token" 
-                              value={verifyToken}
-                              onChange={(e) => setVerifyToken(e.target.value)}
+                              placeholder="Enter your WhatsApp template ID" 
+                              value={whatsappTemplateId}
+                              onChange={(e) => setWhatsappTemplateId(e.target.value)}
                               className="border-gray-200 text-gray-800"
                             />
                             <Text className="text-xs text-gray-600 mt-1.5">
-                              This token is used to verify your webhook URL with the WhatsApp API
+                              The ID of your approved message template from Meta
+                            </Text>
+                          </div>
+                        </motion.div>
+                        
+                        <motion.div variants={itemVariants}>
+                          <div>
+                            <Label className="text-gray-700 mb-1.5 block">Verify Token (System-wide)</Label>
+                            <Input 
+                              value={verifyToken}
+                              disabled
+                              className="border-gray-200 text-gray-500 bg-gray-50"
+                            />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              This token is managed at the system level and cannot be changed by users
                             </Text>
                           </div>
                         </motion.div>
@@ -222,8 +341,13 @@ Always maintain a friendly and professional tone.`);
                                 variant="default"
                                 className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
                                 onClick={saveWhatsAppSettings}
+                                disabled={saving}
                               >
-                                <SaveIcon className="h-4 w-4 mr-2" />
+                                {saving ? (
+                                  <RefreshIcon className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <SaveIcon className="h-4 w-4 mr-2" />
+                                )}
                                 <span>Save Changes</span>
                               </Button>
                             </motion.div>
@@ -237,6 +361,7 @@ Always maintain a friendly and professional tone.`);
                                 variant="secondary" 
                                 className="bg-white text-gray-700 border border-gray-200 shadow-sm hover:bg-gray-50"
                                 onClick={testWhatsAppConnection}
+                                disabled={saving}
                               >
                                 <RefreshIcon className="h-4 w-4 mr-2" />
                                 <span>Test Connection</span>
@@ -279,6 +404,7 @@ Always maintain a friendly and professional tone.`);
                               value={openaiKey}
                               onChange={(e) => setOpenaiKey(e.target.value)}
                               className="border-gray-200 text-gray-800"
+                              type={openaiKey === '••••••••••••••••••••••••••••••' ? 'password' : 'text'}
                             />
                           </div>
                         </motion.div>
@@ -291,9 +417,9 @@ Always maintain a friendly and professional tone.`);
                                 <SelectValue placeholder="Select a model" />
                               </SelectTrigger>
                               <SelectContent className="bg-white">
-                                <SelectItem value="gpt-3.5-turbo" className="text-gray-800">GPT-3.5 Turbo</SelectItem>
-                                <SelectItem value="gpt-4" className="text-gray-800">GPT-4</SelectItem>
-                                <SelectItem value="gpt-4-turbo" className="text-gray-800">GPT-4 Turbo</SelectItem>
+                                <SelectItem value="gpt-4.1" className="text-gray-800">gpt-4.1</SelectItem>
+                                <SelectItem value="gpt-4.1-mini" className="text-gray-800">gpt-4.1-mini</SelectItem>
+                                <SelectItem value="gpt-4.1-nano" className="text-gray-800">gpt-4.1-nano</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -327,8 +453,13 @@ Always maintain a friendly and professional tone.`);
                                 variant="default"
                                 className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
                                 onClick={saveAISettings}
+                                disabled={saving}
                               >
-                                <SaveIcon className="h-4 w-4 mr-2" />
+                                {saving ? (
+                                  <RefreshIcon className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <SaveIcon className="h-4 w-4 mr-2" />
+                                )}
                                 <span>Save Changes</span>
                               </Button>
                             </motion.div>
