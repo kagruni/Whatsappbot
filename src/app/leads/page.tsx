@@ -157,25 +157,53 @@ export default function LeadsPage() {
     
     setIsUploadingCSV(true);
     
+    // Get current session for authentication
+    const { data } = await supabase.auth.getSession();
+    console.log('Session data:', data); // Debug session
+    const accessToken = data.session?.access_token;
+    
+    if (!accessToken) {
+      toast.error('Authentication error: No valid session token found. Please log in again.');
+      setIsUploadingCSV(false);
+      return;
+    }
+    
+    console.log('Token obtained:', accessToken.substring(0, 10) + '...'); // Log partial token for debugging
+    
     const formData = new FormData();
     formData.append('file', file);
     
     try {
+      console.log('Sending request with auth token...');
       const response = await fetch('/api/leads', {
         method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: formData,
       });
       
+      console.log('Response status:', response.status);
       const result = await response.json();
+      console.log('Response body:', result);
       
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to upload CSV');
+        const errorMessage = result.error || 'Failed to upload CSV';
+        
+        // Show a more user-friendly error for common issues
+        if (errorMessage === 'No valid records found in CSV') {
+          throw new Error(
+            'No valid records found in the CSV. Please ensure your file contains at least a "name" and "phone" column with data.'
+          );
+        } else {
+          throw new Error(errorMessage);
+        }
       }
       
       toast.success(result.message || 'CSV uploaded successfully');
       fetchLeads(); // Refresh leads list
     } catch (error: any) {
-      console.error('Error uploading CSV:', error);
+      console.error('CSV upload error details:', error);
       toast.error(error.message || 'Failed to upload CSV');
     } finally {
       setIsUploadingCSV(false);
