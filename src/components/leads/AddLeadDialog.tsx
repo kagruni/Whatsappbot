@@ -11,17 +11,14 @@ import {
   DialogTrigger,
   Input,
   Label,
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue,
   Small,
   Flex,
   Container,
   Text
 } from '@/components/ui';
 import { toast } from 'sonner';
+import supabase from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
 
 interface AddLeadDialogProps {
   onLeadAdded: () => void;
@@ -41,8 +38,9 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
     name: '',
     phone: '',
     email: '',
-    source: 'WhatsApp'
   });
+
+  const { user } = useAuth();
 
   // Use the external state if provided, otherwise use internal state
   const dialogOpen = isOpen !== undefined ? isOpen : internalOpen;
@@ -53,10 +51,6 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSourceChange = (value: string) => {
-    setFormData(prev => ({ ...prev, source: value }));
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -65,21 +59,39 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
       toast.error('Name and phone are required');
       return;
     }
+
+    if (!user) {
+      toast.error('You must be logged in to add leads');
+      return;
+    }
     
     setIsSubmitting(true);
     
     try {
+      // Get current session for authentication
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      
+      if (!accessToken) {
+        toast.error('Authentication error: Please log in again');
+        setIsSubmitting(false);
+        return;
+      }
+      
       const response = await fetch('/api/leads/single', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           name: formData.name,
           phone: formData.phone,
           email: formData.email || null,
-          source: formData.source,
+          source: 'Manual Entry', // Automatically set source to Manual Entry
         }),
+        // Ensure cookies are also sent
+        credentials: 'same-origin',
       });
       
       const result = await response.json();
@@ -89,7 +101,7 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
       }
       
       toast.success('Lead added successfully');
-      setFormData({ name: '', phone: '', email: '', source: 'WhatsApp' });
+      setFormData({ name: '', phone: '', email: '' });
       setDialogOpen(false);
       onLeadAdded(); // Callback to refresh leads
     } catch (error: any) {
@@ -111,17 +123,17 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] bg-gray-800 border-gray-700">
         <DialogHeader>
-          <DialogTitle className="text-gray-800">Add New Lead</DialogTitle>
-          <DialogDescription className="text-gray-500">
+          <DialogTitle className="text-white">Add New Lead</DialogTitle>
+          <DialogDescription className="text-gray-300">
             Fill in the details to add a new lead to your system.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <Container className="grid gap-4 py-4" padding="none">
             <Flex direction="row" align="center" gap="md" className="grid-cols-4">
-              <Label htmlFor="name" className="text-right text-gray-700">
+              <Label htmlFor="name" className="text-right text-white">
                 Name
               </Label>
               <Input
@@ -130,12 +142,12 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
                 value={formData.name}
                 onChange={handleInputChange}
                 placeholder="Full Name"
-                className="col-span-3 border-gray-200 text-gray-800"
+                className="col-span-3 border-gray-600 bg-gray-700 text-white placeholder:text-gray-400 focus:ring-blue-500 focus:border-blue-500"
                 required
               />
             </Flex>
             <Flex direction="row" align="center" gap="md" className="grid-cols-4">
-              <Label htmlFor="phone" className="text-right text-gray-700">
+              <Label htmlFor="phone" className="text-right text-white">
                 Phone
               </Label>
               <Input
@@ -144,12 +156,12 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
                 value={formData.phone}
                 onChange={handleInputChange}
                 placeholder="+1234567890"
-                className="col-span-3 border-gray-200 text-gray-800"
+                className="col-span-3 border-gray-600 bg-gray-700 text-white placeholder:text-gray-400 focus:ring-blue-500 focus:border-blue-500"
                 required
               />
             </Flex>
             <Flex direction="row" align="center" gap="md" className="grid-cols-4">
-              <Label htmlFor="email" className="text-right text-gray-700">
+              <Label htmlFor="email" className="text-right text-white">
                 Email
               </Label>
               <Input
@@ -159,30 +171,8 @@ const AddLeadDialog: React.FC<AddLeadDialogProps> = ({
                 value={formData.email}
                 onChange={handleInputChange}
                 placeholder="email@example.com"
-                className="col-span-3 border-gray-200 text-gray-800"
+                className="col-span-3 border-gray-600 bg-gray-700 text-white placeholder:text-gray-400 focus:ring-blue-500 focus:border-blue-500"
               />
-            </Flex>
-            <Flex direction="row" align="center" gap="md" className="grid-cols-4">
-              <Label htmlFor="source" className="text-right text-gray-700">
-                Source
-              </Label>
-              <Flex direction="column" className="col-span-3">
-                <Select
-                  name="source" 
-                  value={formData.source} 
-                  onValueChange={handleSourceChange}
-                >
-                  <SelectTrigger className="border-gray-200 text-gray-800">
-                    <SelectValue placeholder="Select a source" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="WhatsApp">WhatsApp</SelectItem>
-                    <SelectItem value="Website">Website</SelectItem>
-                    <SelectItem value="Referral">Referral</SelectItem>
-                    <SelectItem value="Other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Flex>
             </Flex>
           </Container>
           <DialogFooter>
