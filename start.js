@@ -1,71 +1,47 @@
-// Startup file for Plesk managed server with Passenger
+// Next.js startup file for Plesk/Passenger deployment
+const { createServer } = require('http');
+const { parse } = require('url');
+const next = require('next');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
 
 // Load environment variables
 require('dotenv').config();
 
-// Check if we're in a production environment
-const isProduction = process.env.NODE_ENV === 'production';
+// Set production mode
+const dev = process.env.NODE_ENV !== 'production';
+const port = process.env.PORT || 3000;
 
-// Set the port Passenger expects 
-const PORT = process.env.PORT || 3000;
+// Log startup information
+console.log(`Starting Next.js server in ${dev ? 'development' : 'production'} mode`);
+console.log(`Current directory: ${process.cwd()}`);
 
-// For Next.js apps in production, we need to use the built app
-if (isProduction) {
-  try {
-    // Check if .next directory exists
-    if (!fs.existsSync(path.join(__dirname, '.next'))) {
-      console.log('Building Next.js application...');
-      // Synchronously build the app if it's not built yet
-      exec('npm run build', (error, stdout, stderr) => {
-        if (error) {
-          console.error(`Build error: ${error}`);
-          return;
-        }
-        console.log(`Build output: ${stdout}`);
-        startApp();
-      });
-    } else {
-      startApp();
-    }
-  } catch (error) {
-    console.error('Error checking or building Next.js app:', error);
-  }
-} else {
-  // In development, use the main app.js Express server
-  require('./src/app');
+// Check if .next directory exists (built app)
+if (!dev && !fs.existsSync(path.join(process.cwd(), '.next'))) {
+  console.error('Error: .next directory not found. Please run "npm run build" first.');
+  process.exit(1);
 }
 
-function startApp() {
-  // For Next.js production deployment, we need to require the built server
-  try {
-    // Start the Next.js server
-    const next = require('next');
-    const app = next({ dev: false, dir: __dirname });
-    const handle = app.getRequestHandler();
-    
-    const express = require('express');
-    const server = express();
-    
-    app.prepare().then(() => {
-      // Pass all requests to Next.js
-      server.all('*', (req, res) => {
-        return handle(req, res);
-      });
+// Initialize Next.js
+const app = next({ dev });
+const handle = app.getRequestHandler();
+
+// Prepare and start server
+app.prepare()
+  .then(() => {
+    createServer((req, res) => {
+      // Parse the URL
+      const parsedUrl = parse(req.url, true);
       
-      server.listen(PORT, (err) => {
-        if (err) throw err;
-        console.log(`> Ready on http://localhost:${PORT}`);
-      });
+      // Let Next.js handle the request
+      handle(req, res, parsedUrl);
+    })
+    .listen(port, (err) => {
+      if (err) throw err;
+      console.log(`> Ready on http://localhost:${port}`);
     });
-  } catch (error) {
-    console.error('Error starting Next.js server:', error);
-    // Fallback to Express server if Next.js fails
-    console.log('Falling back to Express server...');
-    require('./src/app');
-  }
-}
-
-console.log('Application startup script executed'); 
+  })
+  .catch(err => {
+    console.error('Error starting Next.js server:', err);
+    process.exit(1);
+  }); 
