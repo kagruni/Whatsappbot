@@ -304,24 +304,8 @@ export default function SourceDistribution() {
               console.error('Error updating lead status:', updateError);
               failed++;
             } else {
-              // Record conversation in the lead_conversations table
-              const { data: convData, error: convError } = await supabase
-                .from('lead_conversations')
-                .insert({
-                  user_id: user?.id,
-                  lead_id: lead.id,
-                  template_id: templateId,
-                  language: templateLanguage,
-                  status: 'sent',
-                  created_at: new Date().toISOString()
-                });
-              
-              if (convError) {
-                console.error('Error recording conversation:', convError);
-                console.error('Attempted to insert with template_id:', templateId);
-                console.error('Using language:', templateLanguage);
-                console.error('Schema issue? Check if lead_conversations table exists and has expected columns');
-              }
+              // The conversation is already recorded in the API route
+              // Do not create a duplicate record here
               
               // Increment used messages count
               setMessagesUsedToday(prev => prev + 1);
@@ -338,7 +322,8 @@ export default function SourceDistribution() {
               console.error('Error updating lead status:', updateError);
             }
             
-            // Record failed conversation
+            // Record failed conversation - only for failures since successful ones
+            // are recorded in the API
             const { data: convData, error: convError } = await supabase
               .from('lead_conversations')
               .insert({

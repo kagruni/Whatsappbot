@@ -139,7 +139,7 @@ export async function handleMessage(message) {
       const { data: existingLead } = await supabase
         .from('leads')
         .select('id')
-        .eq('phone_number', phoneNumber)
+        .eq('phone', phoneNumber)
         .single();
       
       if (existingLead) {
@@ -150,7 +150,7 @@ export async function handleMessage(message) {
           .from('leads')
           .insert({
             name: leadData.name || 'WhatsApp User',
-            phone_number: phoneNumber,
+            phone: phoneNumber,
             status: 'New',
             user_id: userId
           })
@@ -175,6 +175,7 @@ export async function handleMessage(message) {
         message_content: userMessage,
         direction: 'inbound',
         message_type: 'text',
+        template_id: '',
         created_at: new Date().toISOString(),
         status: 'delivered'
       })
@@ -218,6 +219,7 @@ export async function handleMessage(message) {
         message_content: aiResponse,
         direction: 'outbound',
         message_type: 'text',
+        template_id: '',
         created_at: new Date().toISOString(),
         status: 'sent'
       });

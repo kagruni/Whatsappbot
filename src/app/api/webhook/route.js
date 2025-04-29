@@ -75,75 +75,103 @@ export async function GET(request) {
   }
 }
 
-// WhatsApp message webhook (POST)
+// POST handler for WhatsApp webhook
 export async function POST(request) {
   try {
-    console.log('POST /api/webhook - Webhook called');
     await ensureInitialized();
     
+    // Parse JSON body
     const body = await request.json();
-    console.log('Received webhook payload:', JSON.stringify(body, null, 2));
     
-    // Validate Supabase connection and check if there are valid users
-    try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      
-      if (!supabaseUrl || !supabaseServiceKey) {
-        console.error('CRITICAL: Supabase configuration missing - URL or service key not found!');
-      } else {
-        console.log('Supabase configuration found in environment');
-        
-        // Check if we have user settings
-        const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-          auth: { persistSession: false, autoRefreshToken: false }
-        });
-        
-        const { data, error } = await supabase
-          .from('user_settings')
-          .select('user_id, openai_api_key, whatsapp_phone_id')
-          .limit(5);
-          
-        if (error) {
-          console.error('Error querying Supabase for user settings:', error);
-        } else if (!data || data.length === 0) {
-          console.error('CRITICAL: No users found in Supabase user_settings table!');
-        } else {
-          console.log(`Found ${data.length} users in database. First user:`, {
-            userId: data[0].user_id,
-            hasApiKey: !!data[0].openai_api_key,
-            hasPhoneId: !!data[0].whatsapp_phone_id
-          });
-        }
-      }
-    } catch (configError) {
-      console.error('Error testing Supabase configuration:', configError);
+    // Debug log the webhook event
+    console.log('================ WEBHOOK RECEIVED ================');
+    console.log('WhatsApp webhook POST received:', new Date().toISOString());
+    console.log('Webhook payload:', JSON.stringify(body, null, 2));
+    
+    if (!body) {
+      console.error('Empty webhook body received');
+      return NextResponse.json({ error: 'Empty request body' }, { status: 400 });
     }
+    
+    if (!body.object) {
+      console.error('Invalid webhook format - missing object property');
+      return NextResponse.json({ error: 'Invalid webhook format' }, { status: 400 });
+    }
+    
+    // Set proper content type
+    const headers = {
+      'Content-Type': 'application/json'
+    };
     
     // Process the webhook
     if (body.object === 'whatsapp_business_account') {
       console.log('Valid WhatsApp Business Account webhook');
       
+      if (!body.entry || !Array.isArray(body.entry) || body.entry.length === 0) {
+        console.error('No entries in webhook payload');
+        return NextResponse.json({ error: 'No entries in webhook payload' }, { status: 400 });
+      }
+      
       try {
-        await processWhatsAppWebhook(body);
-        console.log('Successfully processed webhook');
-        return NextResponse.json({ success: true });
+        // Look for messages in the webhook payload
+        let hasMessages = false;
+        let messageCount = 0;
+        
+        for (const entry of body.entry) {
+          if (!entry.changes || !Array.isArray(entry.changes)) continue;
+          
+          for (const change of entry.changes) {
+            if (change.value && change.value.messages && Array.isArray(change.value.messages)) {
+              hasMessages = true;
+              messageCount += change.value.messages.length;
+            }
+          }
+        }
+        
+        console.log(`Webhook contains ${messageCount} messages, processing...`);
+        
+        // Process the webhook with our handler
+        const result = await processWhatsAppWebhook(body);
+        console.log('Webhook processing result:', result);
+        
+        if (result) {
+          console.log('Successfully processed webhook');
+          return NextResponse.json({ success: true, processed: true }, { status: 200, headers });
+        } else {
+          if (hasMessages) {
+            console.warn('Webhook contained messages but no processing occurred');
+            return NextResponse.json(
+              { success: false, error: 'Failed to process messages' }, 
+              { status: 500, headers }
+            );
+          } else {
+            // This might be a status update or another type of webhook
+            console.log('Webhook processed (no messages to handle)');
+            return NextResponse.json({ success: true, processed: false }, { status: 200, headers });
+          }
+        }
       } catch (processingError) {
         console.error('Error in webhook processing:', processingError);
         return NextResponse.json({ 
           error: 'Error processing webhook', 
-          message: processingError.message 
-        }, { status: 500 });
+          message: processingError.message,
+          stack: process.env.NODE_ENV === 'development' ? processingError.stack : undefined
+        }, { status: 500, headers });
       }
     } else {
       console.log(`Invalid object type: ${body.object}`);
-      return NextResponse.json({ error: 'Invalid request' }, { status: 404 });
+      return NextResponse.json({ error: 'Invalid request', object: body.object }, { status: 404, headers });
     }
   } catch (error) {
     console.error('Error processing webhook:', error);
+    console.error('Stack trace:', error.stack);
+    
     return NextResponse.json(
-      { error: 'Error processing webhook', message: error.message }, 
+      { 
+        error: 'Error processing webhook', 
+        message: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
+      }, 
       { status: 500 }
     );
   }
