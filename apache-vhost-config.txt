@@ -1,0 +1,9 @@
+# Add this to your vhost_ssl.conf file
+# Replace the port if you've changed it in ecosystem.config.js
+
+<IfModule mod_proxy.c>
+    ProxyRequests Off
+    ProxyPreserveHost On
+    ProxyPass / http://localhost:3001/
+    ProxyPassReverse / http://localhost:3001/
+</IfModule> 
