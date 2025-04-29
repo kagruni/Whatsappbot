@@ -1,6 +1,6 @@
 {
   "app_type": "node",
-  "startup_file": "test.js",
+  "startup_file": "permissions-test.js",
   "environment": "production",
   "friendly_error_pages": true
 } 
