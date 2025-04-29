@@ -1,9 +1,9 @@
 # Add this to your vhost_ssl.conf file
-# Replace the port if you've changed it in ecosystem.config.js
+# Using port 3657 to avoid conflicts with other applications
 
 <IfModule mod_proxy.c>
     ProxyRequests Off
     ProxyPreserveHost On
-    ProxyPass / http://localhost:3001/
-    ProxyPassReverse / http://localhost:3001/
+    ProxyPass / http://localhost:3657/
+    ProxyPassReverse / http://localhost:3657/
 </IfModule> 
