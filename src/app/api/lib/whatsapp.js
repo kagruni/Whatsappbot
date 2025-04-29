@@ -84,7 +84,8 @@ export async function processWhatsAppWebhook(body) {
               from: from,
               type: messageType,
               text: { body: userMessage },
-              context: message.context
+              context: message.context,
+              id: message.id // Pass the message ID
             });
           } catch (error) {
             console.error('Error handling message:', error);
@@ -92,9 +93,14 @@ export async function processWhatsAppWebhook(body) {
         }
 
         if (change.value.statuses) {
-          change.value.statuses.forEach(status => {
-            handleMessageStatus(status);
-          });
+          console.log('Received status update:', JSON.stringify(change.value.statuses, null, 2));
+          for (const status of change.value.statuses) {
+            try {
+              await handleMessageStatus(status);
+            } catch (statusError) {
+              console.error('Error handling message status:', statusError);
+            }
+          }
         }
       }
     }
@@ -107,11 +113,85 @@ export async function processWhatsAppWebhook(body) {
 
 // Normalize phone number
 function normalizePhoneNumber(phone) {
-  phone = phone.replace(/\D/g, '').replace(/^0+/, '');
-  if (!phone.startsWith('49')) {
-    phone = `49${phone}`;
+  if (!phone) return '';
+  
+  // Log the input format
+  console.log(`Normalizing phone number: ${phone}`);
+  
+  // Remove ALL non-digit characters (spaces, dashes, parentheses, etc.)
+  let normalized = phone.replace(/\D/g, '');
+  
+  // Remove leading zeros
+  normalized = normalized.replace(/^0+/, '');
+  
+  // If number doesn't already have the German country code (49), add it
+  if (!normalized.startsWith('49')) {
+    normalized = `49${normalized}`;
   }
-  return phone;
+  
+  // If the number has extra prefixes, try to remove them
+  if (normalized.length > 13) {
+    console.log(`Phone number unusually long: ${normalized}, might have extra prefix`);
+    // Try to keep only the last 11-12 digits with country code
+    if (normalized.length > 14) {
+      const shorter = normalized.slice(-12);
+      if (shorter.startsWith('49')) {
+        console.log(`Trimming extra digits, from ${normalized} to ${shorter}`);
+        normalized = shorter;
+      }
+    }
+  }
+  
+  console.log(`Normalized phone number result: ${normalized}`);
+  return normalized;
+}
+
+// Helper function to check all existing conversations for a phone number
+async function debugExistingConversations(phoneNumber) {
+  try {
+    console.log(`----- DEBUG: Looking for all conversations for phone ${phoneNumber} -----`);
+    
+    // Step 1: Find all leads with this phone number
+    const { data: leads } = await supabase
+      .from('leads')
+      .select('id, name, status, user_id')
+      .eq('phone', phoneNumber);
+    
+    if (!leads || leads.length === 0) {
+      console.log(`No leads found with phone number ${phoneNumber}`);
+      return;
+    }
+    
+    console.log(`Found ${leads.length} leads with phone ${phoneNumber}:`);
+    leads.forEach((lead, index) => {
+      console.log(`  [${index + 1}] Lead ID: ${lead.id}, Name: ${lead.name}, Status: ${lead.status}, User: ${lead.user_id}`);
+    });
+    
+    // Step 2: Find all conversations for these leads
+    for (const lead of leads) {
+      const { data: conversations } = await supabase
+        .from('lead_conversations')
+        .select('id, message_id, direction, message_type, template_id, message_content, created_at')
+        .eq('lead_id', lead.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      
+      if (!conversations || conversations.length === 0) {
+        console.log(`  No conversations found for lead ${lead.id}`);
+        continue;
+      }
+      
+      console.log(`  Found ${conversations.length} conversations for lead ${lead.id}:`);
+      conversations.forEach((convo, index) => {
+        console.log(`    [${index + 1}] ${convo.created_at} - ${convo.direction}/${convo.message_type} - ID: ${convo.message_id}`);
+        console.log(`        Content: ${convo.message_content}`);
+      });
+    }
+    
+    console.log(`----- END DEBUG for ${phoneNumber} -----`);
+  } catch (error) {
+    console.error('Error in debugExistingConversations:', error);
+  }
 }
 
 // Handle individual message
@@ -119,6 +199,16 @@ export async function handleMessage(message) {
   console.log('Processing message:', JSON.stringify(message, null, 2));
   const phoneNumber = normalizePhoneNumber(message.from);
   const userMessage = message.text.body;
+  
+  // DEBUG: Always check existing conversations for this phone number
+  await debugExistingConversations(phoneNumber);
+  
+  // Extract originating message ID if this is a reply to a template
+  let originatingMessageId = null;
+  if (message.context && message.context.id) {
+    originatingMessageId = message.context.id;
+    console.log(`This is a reply to message: ${originatingMessageId}`);
+  }
 
   try {
     // Get lead info including the assigned userId if available
@@ -133,36 +223,198 @@ export async function handleMessage(message) {
       console.log(`Using assigned user ${userId} for phone ${phoneNumber} from lead info`);
     }
 
-    // Find or create a lead ID for this phone number
-    let leadId;
-    try {
-      const { data: existingLead } = await supabase
-        .from('leads')
-        .select('id')
-        .eq('phone', phoneNumber)
-        .single();
-      
-      if (existingLead) {
-        leadId = existingLead.id;
-      } else {
-        // Create a new lead if none exists
-        const { data: newLead, error } = await supabase
-          .from('leads')
-          .insert({
-            name: leadData.name || 'WhatsApp User',
-            phone: phoneNumber,
-            status: 'New',
-            user_id: userId
-          })
-          .select('id')
+    // Find existing lead ID for this phone number
+    let leadId = null;
+    let existingLead = null;
+    let foundByContext = false;
+    
+    // If this is a reply to a message, try to find the original conversation
+    if (originatingMessageId) {
+      try {
+        // First try exact match
+        console.log(`Searching for exact message_id match: ${originatingMessageId}`);
+        let { data: originalMessage } = await supabase
+          .from('lead_conversations')
+          .select('lead_id, user_id, message_id')
+          .eq('message_id', originatingMessageId)
           .single();
         
-        if (error) throw error;
-        leadId = newLead.id;
+        if (!originalMessage) {
+          // WhatsApp tends to format IDs differently in replies - try with wamid: prefix
+          const possibleFormats = [
+            originatingMessageId,
+            originatingMessageId.replace('wamid:', ''),
+            originatingMessageId.startsWith('wamid:') ? originatingMessageId : `wamid:${originatingMessageId}`,
+            // Sometimes IDs get truncated, try partial match
+            originatingMessageId.slice(0, 20) + '%'
+          ];
+          
+          console.log('Checking additional ID formats:', possibleFormats);
+          
+          // Try each format
+          for (const format of possibleFormats) {
+            if (format === originatingMessageId) continue; // Skip the one we already tried
+            
+            const { data: formatMatch } = await supabase
+              .from('lead_conversations')
+              .select('lead_id, user_id, message_id')
+              .eq('message_id', format)
+              .single();
+              
+            if (formatMatch) {
+              console.log(`Found message with alternate format: ${format}`);
+              originalMessage = formatMatch;
+              break;
+            }
+          }
+          
+          // If still not found, try using LIKE query for partial matches
+          if (!originalMessage) {
+            console.log('Trying partial message ID match with LIKE query');
+            const { data: partialMatches } = await supabase
+              .from('lead_conversations')
+              .select('lead_id, user_id, message_id')
+              .filter('message_id', 'ilike', `%${originatingMessageId.slice(-20)}%`) // Using last part of ID
+              .order('created_at', { ascending: false })
+              .limit(1);
+              
+            if (partialMatches && partialMatches.length > 0) {
+              console.log(`Found message with partial match: ${partialMatches[0].message_id}`);
+              originalMessage = partialMatches[0];
+            }
+          }
+          
+          // If still not found, try to find by phone number
+          if (!originalMessage) {
+            console.log('Still no match found, falling back to phone lookup');
+            // Get all recent message IDs for debugging
+            const { data: recentMessages } = await supabase
+              .from('lead_conversations')
+              .select('message_id')
+              .order('created_at', { ascending: false })
+              .limit(10);
+              
+            console.log('Recent message IDs in database:', recentMessages?.map(m => m.message_id));
+            
+            // Try using phone number to find the latest conversation instead
+            console.log(`Falling back to looking up by phone number: ${phoneNumber}`);
+            const { data: leadsByPhone } = await supabase
+              .from('leads')
+              .select('id, user_id')
+              .eq('phone', phoneNumber);
+              
+            if (leadsByPhone && leadsByPhone.length > 0) {
+              console.log(`Found ${leadsByPhone.length} leads with phone ${phoneNumber}`);
+              // Use the most recently contacted lead
+              const leadIds = leadsByPhone.map(l => l.id);
+              
+              const { data: latestConversation } = await supabase
+                .from('lead_conversations')
+                .select('lead_id, user_id')
+                .in('lead_id', leadIds)
+                .order('created_at', { ascending: false })
+                .limit(1);
+                
+              if (latestConversation && latestConversation.length > 0) {
+                originalMessage = latestConversation[0];
+                console.log(`Found latest conversation with lead_id: ${originalMessage.lead_id}`);
+              }
+            }
+          }
+        }
+        
+        if (originalMessage) {
+          leadId = originalMessage.lead_id;
+          userId = originalMessage.user_id; // Ensure we use the same user_id as the original message
+          foundByContext = true;
+          console.log(`Found original conversation with lead_id: ${leadId} and user_id: ${userId}`);
+        }
+      } catch (error) {
+        console.log(`Couldn't find original message with ID ${originatingMessageId}:`, error);
+        // Continue with normal flow if we can't find the original message
       }
-    } catch (error) {
-      console.error('Error finding/creating lead:', error);
-      throw error;
+    }
+    
+    // If we couldn't find a lead via message context, look it up by phone number
+    if (!leadId) {
+      try {
+        console.log(`Looking up lead by phone: ${phoneNumber}`);
+        
+        // First, log all leads for debugging
+        console.log(`DEBUG: Fetching all leads to check phone numbers`);
+        const { data: allLeads } = await supabase
+          .from('leads')
+          .select('id, name, phone, status, user_id');
+          
+        if (allLeads && allLeads.length > 0) {
+          console.log(`DEBUG: Found ${allLeads.length} total leads in system`);
+          
+          // Find any leads with matching phone (ignoring spaces/formatting)
+          const strippedPhone = phoneNumber.replace(/\D/g, '');
+          const matchingLeads = allLeads.filter(lead => {
+            const leadPhone = (lead.phone || '').replace(/\D/g, '');
+            return leadPhone === strippedPhone || 
+                   leadPhone === strippedPhone.replace(/^49/, '') ||
+                   '49' + leadPhone === strippedPhone;
+          });
+          
+          if (matchingLeads.length > 0) {
+            console.log(`DEBUG: Found ${matchingLeads.length} leads with matching phone numbers (ignoring spaces/formatting):`);
+            matchingLeads.forEach(lead => 
+              console.log(`  - ID: ${lead.id}, Name: ${lead.name}, Phone: ${lead.phone}, Status: ${lead.status}, User: ${lead.user_id}`)
+            );
+            
+            // Use the first matching lead
+            const matchedLead = matchingLeads[0];
+            existingLead = matchedLead;
+            leadId = matchedLead.id;
+            
+            // If we found the lead but userId is different, use the lead's user_id for consistency
+            if (matchedLead.user_id && matchedLead.user_id !== userId) {
+              console.log(`Updating userId from ${userId} to ${matchedLead.user_id} based on lead association`);
+              userId = matchedLead.user_id;
+            }
+            
+            console.log(`Using matched lead with ID: ${leadId} (${matchedLead.name})`);
+          } else {
+            console.log(`DEBUG: No leads found with matching phone number (ignoring spaces/formatting)`);
+            
+            // If exact matching failed, try to match on last 8 digits
+            const last8Digits = strippedPhone.slice(-8);
+            const similarLeads = allLeads.filter(lead => {
+              const leadPhone = (lead.phone || '').replace(/\D/g, '');
+              return leadPhone.endsWith(last8Digits);
+            });
+            
+            if (similarLeads.length > 0) {
+              console.log(`DEBUG: Found ${similarLeads.length} leads with similar phone numbers (matching last 8 digits):`);
+              similarLeads.forEach(lead => 
+                console.log(`  - ID: ${lead.id}, Name: ${lead.name}, Phone: ${lead.phone}, Status: ${lead.status}, User: ${lead.user_id}`)
+              );
+              
+              // Use the first similar lead by default
+              const selectedLead = similarLeads[0];
+              existingLead = selectedLead;
+              leadId = selectedLead.id;
+              
+              // If we found the lead but userId is different, use the lead's user_id for consistency
+              if (selectedLead.user_id && selectedLead.user_id !== userId) {
+                console.log(`Updating userId from ${userId} to ${selectedLead.user_id} based on lead association`);
+                userId = selectedLead.user_id;
+              }
+              
+              console.log(`Using similar lead with ID: ${leadId} (${selectedLead.name})`);
+            } else {
+              console.log(`DEBUG: No leads found with similar phone numbers (matching last 8 digits)`);
+            }
+          }
+        } else {
+          console.log(`DEBUG: No leads found in system`);
+        }
+      } catch (error) {
+        console.error('Error finding/creating lead:', error);
+        throw error;
+      }
     }
     
     // Store the incoming message in the database
@@ -226,7 +478,11 @@ export async function handleMessage(message) {
     
     // Send WhatsApp message using user-specific settings
     await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse);
-    await markLeadAsContacted(phoneNumber);
+    
+    // If we found a lead, update its status (but only if not already contacted)
+    if (leadId) {
+      await markLeadAsContacted(phoneNumber);
+    }
 
     // Check for trigger words
     if (isLeadInterested(userMessage, aiResponse)) {
@@ -376,8 +632,153 @@ export async function sendWhatsAppTemplateMessageForUser(userId, to, components,
         }
       }
     );
-    console.log('Template message sent successfully:', response.data);
-    return response.data.messages[0].id; // Return the message ID
+    
+    console.log('Template message sent successfully:', JSON.stringify(response.data));
+    
+    // Ensure we have a valid message ID
+    if (!response.data || !response.data.messages || !response.data.messages[0] || !response.data.messages[0].id) {
+      console.error('Error: WhatsApp API did not return a valid message ID', response.data);
+      throw new Error('WhatsApp API did not return a valid message ID');
+    }
+    
+    // Ensure consistent message ID format - normalize to remove any potential prefix
+    const rawMessageId = response.data.messages[0].id;
+    // Store with and without wamid: prefix for reliable matching
+    const messageId = rawMessageId.startsWith('wamid:') ? rawMessageId : `wamid:${rawMessageId}`;
+    
+    console.log(`Normalized message ID: ${messageId} (original: ${rawMessageId})`);
+    console.log(`Message ID format/type: ${typeof messageId}, length: ${messageId.length}`);
+    
+    // Check if this lead already exists by phone number
+    console.log(`Checking for existing lead with phone: ${to}`);
+    
+    // First, log all leads for debugging
+    console.log(`DEBUG: Fetching all leads to check phone numbers`);
+    const { data: allLeads, error: leadsError } = await supabase
+      .from('leads')
+      .select('id, name, phone, status, user_id');
+    
+    if (leadsError) {
+      console.error(`Error fetching leads:`, leadsError);
+    }
+    
+    let leadId;
+    let existingLead = null;
+    
+    if (allLeads && allLeads.length > 0) {
+      console.log(`DEBUG: Found ${allLeads.length} total leads in system`);
+      
+      // Find any leads with matching phone (ignoring spaces/formatting)
+      const strippedPhone = to.replace(/\D/g, '');
+      const matchingLeads = allLeads.filter(lead => {
+        const leadPhone = (lead.phone || '').replace(/\D/g, '');
+        return leadPhone === strippedPhone || 
+               leadPhone === strippedPhone.replace(/^49/, '') ||
+               '49' + leadPhone === strippedPhone;
+      });
+      
+      if (matchingLeads.length > 0) {
+        console.log(`DEBUG: Found ${matchingLeads.length} leads with matching phone numbers (ignoring spaces/formatting):`);
+        matchingLeads.forEach(lead => 
+          console.log(`  - ID: ${lead.id}, Name: ${lead.name}, Phone: ${lead.phone}, Status: ${lead.status}, User: ${lead.user_id}`)
+        );
+        
+        // Use the first matching lead
+        existingLead = matchingLeads[0];
+        leadId = existingLead.id;
+        console.log(`Using matched lead with ID: ${leadId} (${existingLead.name})`);
+      } else {
+        console.log(`DEBUG: No leads found with matching phone number (ignoring spaces/formatting)`);
+        
+        // If exact matching failed, try to match on last 8 digits
+        const last8Digits = strippedPhone.slice(-8);
+        const similarLeads = allLeads.filter(lead => {
+          const leadPhone = (lead.phone || '').replace(/\D/g, '');
+          return leadPhone.endsWith(last8Digits);
+        });
+        
+        if (similarLeads.length > 0) {
+          console.log(`DEBUG: Found ${similarLeads.length} leads with similar phone numbers (matching last 8 digits):`);
+          similarLeads.forEach(lead => 
+            console.log(`  - ID: ${lead.id}, Name: ${lead.name}, Phone: ${lead.phone}, Status: ${lead.status}, User: ${lead.user_id}`)
+          );
+          
+          // Use the first similar lead by default
+          const selectedLead = similarLeads[0];
+          existingLead = selectedLead;
+          leadId = selectedLead.id;
+          
+          // If we found the lead but userId is different, use the lead's user_id for consistency
+          if (selectedLead.user_id && selectedLead.user_id !== userId) {
+            console.log(`Updating userId from ${userId} to ${selectedLead.user_id} based on lead association`);
+            userId = selectedLead.user_id;
+          }
+          
+          console.log(`Using similar lead with ID: ${leadId} (${selectedLead.name})`);
+        } else {
+          console.log(`DEBUG: No leads found with similar phone numbers (matching last 8 digits)`);
+        }
+      }
+    } else {
+      console.log(`DEBUG: No leads found in system`);
+    }
+    
+    // If no existing lead found, create a new one
+    if (!existingLead) {
+      console.log(`Creating new lead for phone ${to}`);
+      const { data: newLead, error: createError } = await supabase
+        .from('leads')
+        .insert({
+          name: templateValues?.recipientName || 'WhatsApp User',
+          phone: to,
+          status: 'New',
+          user_id: userId
+        })
+        .select('id')
+        .single();
+      
+      if (createError) {
+        console.error(`Error creating lead:`, createError);
+        throw createError;
+      }
+      
+      leadId = newLead.id;
+      console.log(`Created new lead: ${leadId}`);
+    }
+    
+    // Store this message in the database with its ID so we can track replies
+    const { data: messageRecord, error: messageError } = await supabase
+      .from('lead_conversations')
+      .insert({
+        user_id: userId,
+        lead_id: leadId,
+        message_id: messageId, // Store the WhatsApp message ID for tracking replies
+        message_content: `Template message: ${templateId}`,
+        direction: 'outbound',
+        message_type: 'template',
+        template_id: templateId,
+        created_at: new Date().toISOString(),
+        status: 'sent'
+      })
+      .select('id');
+    
+    if (messageError) {
+      console.error('Error storing template message in database:', messageError);
+      throw messageError;
+    }
+    
+    console.log(`Successfully stored template message in database with ID: ${messageId} and record ID: ${messageRecord[0].id}`);
+    
+    // For debugging: retrieve the message we just stored to verify it
+    const { data: storedMessage } = await supabase
+      .from('lead_conversations')
+      .select('message_id')
+      .eq('id', messageRecord[0].id)
+      .single();
+      
+    console.log(`Verification - stored message ID in database: ${storedMessage?.message_id}`);
+    
+    return messageId; // Return the message ID
   } catch (error) {
     console.error('Error sending template message:', error.response ? error.response.data : error.message);
     throw error;
@@ -416,11 +817,36 @@ export async function markLeadAsContacted(phone, status = 'contacted') {
 }
 
 // Handle message status updates
-export function handleMessageStatus(status) {
-  const { id, status: messageStatus, recipient_id } = status;
-  console.log(`Message ${id} to ${recipient_id} status: ${messageStatus}`);
-  
-  // Implement additional handling if needed
+export async function handleMessageStatus(status) {
+  try {
+    const { id, status: messageStatus, recipient_id } = status;
+    console.log(`Message ${id} to ${recipient_id} status: ${messageStatus}`);
+    
+    // Only process delivered, read, and failed statuses
+    if (!['delivered', 'read', 'failed'].includes(messageStatus)) {
+      return;
+    }
+    
+    // Try to update the message status in the database
+    const { data, error } = await supabase
+      .from('lead_conversations')
+      .update({ status: messageStatus })
+      .eq('message_id', id)
+      .select('id, lead_id, user_id');
+      
+    if (error) {
+      console.error(`Error updating message status for message ${id}:`, error);
+      return;
+    }
+    
+    if (data && data.length > 0) {
+      console.log(`Updated status for message ${id} to ${messageStatus} (lead: ${data[0].lead_id})`);
+    } else {
+      console.log(`No message found with ID ${id} for status update`);
+    }
+  } catch (error) {
+    console.error('Error in handleMessageStatus:', error);
+  }
 }
 
 // Check if lead is interested based on trigger words
