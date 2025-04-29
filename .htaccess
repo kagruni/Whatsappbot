@@ -1,17 +1,17 @@
 PassengerNodejs /usr/bin/node
 PassengerAppType node
-PassengerStartupFile start.js
+PassengerStartupFile start-simple.js
 PassengerAppRoot /var/www/vhosts/whatsappmotherfucker.karelgrunert.de/Whatsappbot
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
   
-  # Handle Next.js _next static files
-  RewriteRule ^_next/(.*) /_next/$1 [L]
+  # Handle static files
+  RewriteRule ^(public|assets|_next)/(.*) /$1/$2 [L]
   
-  # Handle API routes
-  RewriteRule ^api/(.*) /api/$1 [L]
+  # Handle health check endpoint
+  RewriteRule ^health$ /health [L]
   
   # For everything else, let Passenger handle it
   RewriteCond %{REQUEST_FILENAME} !-f
