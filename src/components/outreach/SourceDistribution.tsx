@@ -286,11 +286,11 @@ export default function SourceDistribution() {
         try {
           console.log('Processing lead:', lead.name, lead.phone);
           
-          // Send the WhatsApp template message
-          const response = await sendWhatsAppTemplateMessage(lead.phone, templateId, templateLanguage);
+          // Send the WhatsApp template message with lead details
+          const response = await sendWhatsAppTemplateMessage(lead.phone, templateId, templateLanguage, lead.id, lead.name);
           
           // Check if message was sent successfully
-          const success = response && response.messages && response.messages.length > 0;
+          const success = response && response.success;
           console.log('WhatsApp API response:', response);
           
           if (success) {
@@ -429,78 +429,54 @@ export default function SourceDistribution() {
   };
 
   // Define the function to send WhatsApp template messages
-  async function sendWhatsAppTemplateMessage(phoneNumber: string, templateName: string, language: string) {
+  async function sendWhatsAppTemplateMessage(phoneNumber: string, templateName: string, language: string, leadId: string, leadName: string) {
     try {
-      // Normalize the phone number to German format with 49 prefix
-      const normalizedPhone = normalizeGermanPhoneNumber(phoneNumber);
-      
-      // Use the hardcoded token from the .env file
-      // Note: In a production app, this should be securely stored and retrieved
-      const token = "EAAQsyhaTJtIBO1I7Qd77saDZC7FeeWXdzuBPUvYWvyW5aHoZC8zPf5GnGwQYe8f1cKQVB7ZBRuV5YxSB9xeTyZBsB5KNm2WbeZB5YtyOkpBgerJNKaK3wRKojkSWmiRjfRZCwhrkWYekHu9x84K5PcrFHyBxdORFWgUJIzCizDZApjevJukkl7eqoXuwTLBGhxZCEgZDZD";
-      
-      if (!whatsappPhoneId) {
-        throw new Error('Missing WhatsApp phone ID');
-      }
-      
-      // Make API call to WhatsApp
-      const url = `https://graph.facebook.com/v16.0/${whatsappPhoneId}/messages`;
-      
-      console.log('Sending WhatsApp template message:', {
-        phoneNumber: normalizedPhone,
-        originalPhone: phoneNumber,
+      console.log('Sending WhatsApp template message to:', {
+        phoneNumber,
+        leadName,
+        leadId,
         templateName,
-        language,
-        phoneId: whatsappPhoneId,
-        hasImageUrl: !!templateImageUrl
+        language
       });
       
-      // Create request payload based on whether we have an image URL
-      const requestPayload = {
-        messaging_product: 'whatsapp',
-        to: normalizedPhone,
-        type: 'template',
-        template: {
-          name: templateName,
-          language: {
-            code: language
-          }
-        }
-      };
+      // Instead of direct WhatsApp API call, use our server endpoint
+      const response = await fetch('/api/whatsapp/send-template', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          phoneNumber,
+          leadName,
+          leadId,
+          userId: user?.id, // Include the user ID for authentication fallback
+        }),
+      });
       
-      // If we have a template image URL, add the header component with the image
-      if (templateImageUrl) {
-        // Add components array with header that includes image
-        (requestPayload.template as any).components = [
-          {
-            type: 'header',
-            parameters: [
-              {
-                type: 'image',
-                image: {
-                  link: templateImageUrl
-                }
-              }
-            ]
-          }
-        ];
+      const responseData = await response.json();
+      
+      if (!response.ok) {
+        // Get detailed error message from response
+        const errorMessage = responseData.error || `Server responded with status: ${response.status}`;
+        console.error('WhatsApp API error:', errorMessage, responseData);
+        
+        // Show the error to the user
+        toast.error(`Failed to send WhatsApp message: ${errorMessage}`);
+        
+        throw new Error(errorMessage);
       }
       
-      const response = await axios.post(
-        url,
-        requestPayload,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      console.log('WhatsApp template message sent successfully:', response.data);
-      return response.data;
+      console.log('WhatsApp template message sent successfully:', responseData);
+      return responseData;
     } catch (error: any) {
-      console.error('Error sending WhatsApp template message:', 
-        error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+      console.error('Error sending WhatsApp template message:', error.message);
+      
+      // Show a friendly error message to the user
+      toast.error('Failed to send WhatsApp message. Check console for details.', {
+        id: 'whatsapp-error', // Using ID for deduplication
+        duration: 5000
+      });
+      
       throw error;
     }
   }
