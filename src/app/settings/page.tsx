@@ -91,8 +91,10 @@ export default function SettingsPage() {
   const [whatsappToken, setWhatsappToken] = useState('');
   const [whatsappPhoneId, setWhatsappPhoneId] = useState('');
   const [whatsappTemplateId, setWhatsappTemplateId] = useState('');
+  const [whatsappTemplateImageUrl, setWhatsappTemplateImageUrl] = useState('');
   const [verifyToken, setVerifyToken] = useState('');
   const [messageLimit, setMessageLimit] = useState(30);
+  const [whatsappLanguage, setWhatsappLanguage] = useState('en');
   const [openaiKey, setOpenaiKey] = useState('');
   const [aiModel, setAiModel] = useState('gpt-4.1-mini');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -117,7 +119,9 @@ export default function SettingsPage() {
       if (settings) {
         setWhatsappPhoneId(settings.whatsapp_phone_id || '');
         setWhatsappTemplateId(settings.whatsapp_template_id || '');
+        setWhatsappTemplateImageUrl(settings.whatsapp_template_image_url || '');
         setMessageLimit(settings.message_limit_24h || 30);
+        setWhatsappLanguage(settings.whatsapp_language || 'en');
         setOpenaiKey(settings.openai_api_key ? '••••••••••••••••••••••••••••••' : '');
         setAiModel(settings.ai_model || 'gpt-4.1-mini');
         setSystemPrompt(settings.system_prompt || '');
@@ -141,7 +145,9 @@ export default function SettingsPage() {
       await saveUserSettings({
         whatsapp_phone_id: whatsappPhoneId,
         whatsapp_template_id: whatsappTemplateId,
-        message_limit_24h: messageLimit
+        whatsapp_template_image_url: whatsappTemplateImageUrl,
+        message_limit_24h: messageLimit,
+        whatsapp_language: whatsappLanguage
       });
       toast.success('WhatsApp settings saved successfully');
     } catch (error) {
@@ -320,6 +326,21 @@ export default function SettingsPage() {
                         
                         <motion.div variants={itemVariants}>
                           <div>
+                            <Label className="text-gray-700 mb-1.5 block">WhatsApp Template Image URL</Label>
+                            <Input 
+                              placeholder="Enter the image URL for your template" 
+                              value={whatsappTemplateImageUrl}
+                              onChange={(e) => setWhatsappTemplateImageUrl(e.target.value)}
+                              className="border-gray-200 text-gray-800"
+                            />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              URL to the image used in your WhatsApp template
+                            </Text>
+                          </div>
+                        </motion.div>
+                        
+                        <motion.div variants={itemVariants}>
+                          <div>
                             <Label className="text-gray-700 mb-1.5 block">24-Hour Message Limit</Label>
                             <Input 
                               type="number"
@@ -345,6 +366,27 @@ export default function SettingsPage() {
                             />
                             <Text className="text-xs text-gray-600 mt-1.5">
                               This token is managed at the system level and cannot be changed by users
+                            </Text>
+                          </div>
+                        </motion.div>
+                        
+                        <motion.div variants={itemVariants}>
+                          <div>
+                            <Label className="text-gray-700 mb-1.5 block">WhatsApp Language</Label>
+                            <Select value={whatsappLanguage} onValueChange={setWhatsappLanguage}>
+                              <SelectTrigger className="border-gray-200 text-gray-800">
+                                <SelectValue placeholder="Select language" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white">
+                                <SelectItem value="en" className="text-gray-800">English (en)</SelectItem>
+                                <SelectItem value="en_US" className="text-gray-800">English (United States)</SelectItem>
+                                <SelectItem value="de" className="text-gray-800">German (de)</SelectItem>
+                                <SelectItem value="de_AT" className="text-gray-800">German (Austria)</SelectItem>
+                                <SelectItem value="de_CH" className="text-gray-800">German (Switzerland)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              Language used for WhatsApp messages and templates
                             </Text>
                           </div>
                         </motion.div>

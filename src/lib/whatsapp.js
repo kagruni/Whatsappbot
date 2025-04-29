@@ -227,6 +227,49 @@ function handleMessageStatus(status) {
   // Implement additional handling if needed
 }
 
+// Send WhatsApp message using template
+async function sendWhatsAppTemplateMessage(phoneNumberId, token, to, templateName, language, components = []) {
+  const url = `https://graph.facebook.com/v16.0/${phoneNumberId}/messages`;
+
+  try {
+    // Normalize phone number if needed
+    if (!to.startsWith('49') && !to.startsWith('+49')) {
+      to = normalizePhoneNumber(to);
+    }
+    
+    // Make sure phone number is in international format (without '+' sign for WhatsApp API)
+    to = to.replace(/^\+/, '');
+
+    const response = await axios.post(
+      url,
+      {
+        messaging_product: 'whatsapp',
+        to: to,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: {
+            code: language
+          },
+          components: components
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    console.log('Template message sent successfully:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error sending WhatsApp template message:', 
+      error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   verifyWhatsAppWebhook,
   processWhatsAppWebhook,
@@ -234,5 +277,6 @@ module.exports = {
   normalizePhoneNumber,
   generateAIResponseForUser,
   sendWhatsAppMessageForUser,
+  sendWhatsAppTemplateMessage,
   markLeadAsContacted
 }; 

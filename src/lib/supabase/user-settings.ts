@@ -5,6 +5,8 @@ export interface UserSettings {
   user_id: string;
   whatsapp_phone_id?: string;
   whatsapp_template_id?: string;
+  whatsapp_template_image_url?: string;
+  whatsapp_language?: string;
   openai_api_key?: string;
   ai_model?: string;
   system_prompt?: string;

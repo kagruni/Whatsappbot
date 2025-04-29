@@ -10,6 +10,7 @@ import { Lead } from '@/types/leads';
 import { toast } from 'sonner';
 import supabase from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
+import axios from 'axios';
 
 interface SourceData {
   source: string;
@@ -22,6 +23,10 @@ interface SourceData {
 
 interface UserSettings {
   whatsapp_template_id: string | null;
+  message_limit_24h: number;
+  whatsapp_language: string | null;
+  whatsapp_phone_id: string | null;
+  whatsapp_template_image_url: string | null;
 }
 
 // Add WhatsApp brand colors below color palette
@@ -39,18 +44,40 @@ const colors = [
 // WhatsApp brand colors
 const WHATSAPP_GREEN = '#25D366';
 
+// Function to normalize German phone numbers
+function normalizeGermanPhoneNumber(phone: string): string {
+  // Remove all non-digit characters
+  let normalized = phone.replace(/\D/g, '');
+  
+  // Remove leading zero(s) which are used in domestic German format
+  normalized = normalized.replace(/^0+/, '');
+  
+  // If number doesn't already have the German country code, add it
+  if (!normalized.startsWith('49')) {
+    normalized = `49${normalized}`;
+  }
+  
+  return normalized;
+}
+
 export default function SourceDistribution() {
   const [sourceData, setSourceData] = useState<SourceData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [totalLeads, setTotalLeads] = useState(0);
   const [templateId, setTemplateId] = useState<string | null>(null);
+  const [messageLimit, setMessageLimit] = useState<number>(0);
+  const [messagesUsedToday, setMessagesUsedToday] = useState<number>(0);
   const [initiatingSource, setInitiatingSource] = useState<string | null>(null);
+  const [templateLanguage, setTemplateLanguage] = useState<string | null>(null);
+  const [whatsappPhoneId, setWhatsappPhoneId] = useState<string | null>(null);
+  const [templateImageUrl, setTemplateImageUrl] = useState<string | null>(null);
   const { user } = useAuth();
 
   useEffect(() => {
     if (user) {
       fetchLeadSourceData();
       fetchUserSettings();
+      fetchMessageCount();
     }
   }, [user]);
 
@@ -60,7 +87,7 @@ export default function SourceDistribution() {
 
       const { data, error } = await supabase
         .from('user_settings')
-        .select('whatsapp_template_id')
+        .select('whatsapp_template_id, message_limit_24h, whatsapp_language, whatsapp_phone_id, whatsapp_template_image_url')
         .eq('user_id', user.id)
         .single();
 
@@ -71,9 +98,42 @@ export default function SourceDistribution() {
 
       if (data) {
         setTemplateId(data.whatsapp_template_id);
+        setMessageLimit(data.message_limit_24h || 0);
+        setTemplateLanguage(data.whatsapp_language);
+        setWhatsappPhoneId(data.whatsapp_phone_id);
+        setTemplateImageUrl(data.whatsapp_template_image_url);
       }
     } catch (error: any) {
       console.error('Error in fetchUserSettings:', error);
+    }
+  };
+
+  const fetchMessageCount = async () => {
+    try {
+      if (!user) return;
+
+      // Get the start of the current day (midnight)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Query conversations created in the last 24 hours
+      const { data, error } = await supabase
+        .from('lead_conversations')
+        .select('id')
+        .eq('user_id', user.id)
+        .gte('created_at', today.toISOString());
+
+      if (error) {
+        console.error('Error fetching conversation count:', error);
+        return;
+      }
+
+      // Count the records in JavaScript
+      const count = data ? data.length : 0;
+      setMessagesUsedToday(count);
+      
+    } catch (error: any) {
+      console.error('Error in fetchMessageCount:', error);
     }
   };
 
@@ -158,6 +218,21 @@ export default function SourceDistribution() {
       return;
     }
 
+    if (!templateLanguage) {
+      toast.error('No WhatsApp template language found in your settings. Please configure your template language.');
+      return;
+    }
+
+    if (!whatsappPhoneId) {
+      toast.error('No WhatsApp phone ID found in your settings. Please configure your WhatsApp phone ID.');
+      return;
+    }
+
+    if (messageLimit <= 0) {
+      toast.error('No message limit set in your settings. Please configure your daily message limit.');
+      return;
+    }
+
     try {
       setInitiatingSource(source);
       
@@ -167,6 +242,16 @@ export default function SourceDistribution() {
           item.source === source ? { ...item, inProgress: true } : item
         )
       );
+      
+      // Refresh the current message count before starting
+      await fetchMessageCount();
+      
+      // Calculate how many more messages we can send today
+      const remainingMessages = messageLimit - messagesUsedToday;
+      
+      if (remainingMessages <= 0) {
+        throw new Error(`Daily message limit of ${messageLimit} reached. Try again tomorrow.`);
+      }
       
       // Find all leads for this source
       const { data: leads, error } = await supabase
@@ -184,69 +269,127 @@ export default function SourceDistribution() {
         throw new Error('No leads found for this source or all leads have been contacted');
       }
       
+      // Limit leads to process based on remaining message quota
+      const leadsToProcess = leads.slice(0, remainingMessages);
+      
+      // Notify if we're not processing all leads due to limits
+      if (leadsToProcess.length < leads.length) {
+        toast.info(`Processing ${leadsToProcess.length} out of ${leads.length} leads due to daily message limit.`);
+      }
+      
       // Create a throttled process to send messages (to prevent hitting API limits)
       let succeeded = 0;
       let failed = 0;
       
-      // In a real implementation, we would make API calls to send messages here
-      // For now, we'll simulate the process with setTimeout
-      
-      for (const lead of leads) {
-        // Simulate API call with a timeout
-        await new Promise<void>((resolve) => {
-          setTimeout(async () => {
-            try {
-              // Simulated API call to send a message
-              const success = Math.random() > 0.1; // 90% success rate for simulation
+      for (const lead of leadsToProcess) {
+        // Actual WhatsApp API call instead of simulation
+        try {
+          console.log('Processing lead:', lead.name, lead.phone);
+          
+          // Send the WhatsApp template message
+          const response = await sendWhatsAppTemplateMessage(lead.phone, templateId, templateLanguage);
+          
+          // Check if message was sent successfully
+          const success = response && response.messages && response.messages.length > 0;
+          console.log('WhatsApp API response:', response);
+          
+          if (success) {
+            // Update lead status to Contacted
+            const { error: updateError } = await supabase
+              .from('leads')
+              .update({ status: 'Contacted' })
+              .eq('id', lead.id);
+            
+            if (updateError) {
+              console.error('Error updating lead status:', updateError);
+              failed++;
+            } else {
+              // Record conversation in the lead_conversations table
+              const { data: convData, error: convError } = await supabase
+                .from('lead_conversations')
+                .insert({
+                  user_id: user?.id,
+                  lead_id: lead.id,
+                  template_id: templateId,
+                  language: templateLanguage,
+                  status: 'sent',
+                  created_at: new Date().toISOString()
+                });
               
-              if (success) {
-                // Update lead status to Contacted
-                const { error: updateError } = await supabase
-                  .from('leads')
-                  .update({ status: 'Contacted' })
-                  .eq('id', lead.id);
-                
-                if (updateError) {
-                  console.error('Error updating lead status:', updateError);
-                  failed++;
-                } else {
-                  succeeded++;
-                }
-              } else {
-                // Update lead status to Failed
-                const { error: updateError } = await supabase
-                  .from('leads')
-                  .update({ status: 'Failed' })
-                  .eq('id', lead.id);
-                
-                if (updateError) {
-                  console.error('Error updating lead status:', updateError);
-                }
-                failed++;
+              if (convError) {
+                console.error('Error recording conversation:', convError);
+                console.error('Attempted to insert with template_id:', templateId);
+                console.error('Using language:', templateLanguage);
+                console.error('Schema issue? Check if lead_conversations table exists and has expected columns');
               }
               
-              // Update the UI to show progress
-              setSourceData(prevData => 
-                prevData.map(item => 
-                  item.source === source ? { 
-                    ...item, 
-                    contacted: item.contacted + (success ? 1 : 0),
-                    failed: item.failed + (success ? 0 : 1)
-                  } : item
-                )
-              );
-              
-              resolve();
-            } catch (e) {
-              console.error('Error sending message:', e);
-              failed++;
-              resolve();
+              // Increment used messages count
+              setMessagesUsedToday(prev => prev + 1);
+              succeeded++;
             }
-          }, 300); // Process each lead with a small delay
-        });
+          } else {
+            // Update lead status to Failed
+            const { error: updateError } = await supabase
+              .from('leads')
+              .update({ status: 'Failed' })
+              .eq('id', lead.id);
+            
+            if (updateError) {
+              console.error('Error updating lead status:', updateError);
+            }
+            
+            // Record failed conversation
+            const { data: convData, error: convError } = await supabase
+              .from('lead_conversations')
+              .insert({
+                user_id: user?.id,
+                lead_id: lead.id,
+                template_id: templateId,
+                language: templateLanguage,
+                status: 'failed',
+                created_at: new Date().toISOString()
+              });
+            
+            if (convError) {
+              console.error('Error recording failed conversation:', convError);
+              console.error('Attempted to insert with template_id:', templateId);
+              console.error('Using language:', templateLanguage);
+              console.error('Schema issue? Check if lead_conversations table exists and has expected columns');
+            }
+            
+            // Increment used messages count
+            setMessagesUsedToday(prev => prev + 1);
+            failed++;
+          }
+          
+          // Update the UI to show progress
+          setSourceData(prevData => 
+            prevData.map(item => 
+              item.source === source ? { 
+                ...item, 
+                contacted: item.contacted + (success ? 1 : 0),
+                failed: item.failed + (success ? 0 : 1)
+              } : item
+            )
+          );
+          
+        } catch (e) {
+          console.error('Error sending message:', e);
+          failed++;
+        }
+        
+        // Add a small delay between API calls to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
       
-      toast.success(`Completed: ${succeeded} messages sent, ${failed} failed`);
+      if (succeeded + failed === leadsToProcess.length) {
+        const remainingLeads = leads.length - leadsToProcess.length;
+        if (remainingLeads > 0) {
+          toast.success(`Completed: ${succeeded} messages sent, ${failed} failed. ${remainingLeads} leads remaining due to daily limit.`);
+        } else {
+          toast.success(`Completed: ${succeeded} messages sent, ${failed} failed.`);
+        }
+      }
     } catch (error: any) {
       console.error('Error initiating conversations:', error);
       toast.error(`Failed to initiate conversations: ${error.message}`);
@@ -285,6 +428,83 @@ export default function SourceDistribution() {
     }
   };
 
+  // Define the function to send WhatsApp template messages
+  async function sendWhatsAppTemplateMessage(phoneNumber: string, templateName: string, language: string) {
+    try {
+      // Normalize the phone number to German format with 49 prefix
+      const normalizedPhone = normalizeGermanPhoneNumber(phoneNumber);
+      
+      // Use the hardcoded token from the .env file
+      // Note: In a production app, this should be securely stored and retrieved
+      const token = "EAAQsyhaTJtIBO1I7Qd77saDZC7FeeWXdzuBPUvYWvyW5aHoZC8zPf5GnGwQYe8f1cKQVB7ZBRuV5YxSB9xeTyZBsB5KNm2WbeZB5YtyOkpBgerJNKaK3wRKojkSWmiRjfRZCwhrkWYekHu9x84K5PcrFHyBxdORFWgUJIzCizDZApjevJukkl7eqoXuwTLBGhxZCEgZDZD";
+      
+      if (!whatsappPhoneId) {
+        throw new Error('Missing WhatsApp phone ID');
+      }
+      
+      // Make API call to WhatsApp
+      const url = `https://graph.facebook.com/v16.0/${whatsappPhoneId}/messages`;
+      
+      console.log('Sending WhatsApp template message:', {
+        phoneNumber: normalizedPhone,
+        originalPhone: phoneNumber,
+        templateName,
+        language,
+        phoneId: whatsappPhoneId,
+        hasImageUrl: !!templateImageUrl
+      });
+      
+      // Create request payload based on whether we have an image URL
+      const requestPayload = {
+        messaging_product: 'whatsapp',
+        to: normalizedPhone,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: {
+            code: language
+          }
+        }
+      };
+      
+      // If we have a template image URL, add the header component with the image
+      if (templateImageUrl) {
+        // Add components array with header that includes image
+        (requestPayload.template as any).components = [
+          {
+            type: 'header',
+            parameters: [
+              {
+                type: 'image',
+                image: {
+                  link: templateImageUrl
+                }
+              }
+            ]
+          }
+        ];
+      }
+      
+      const response = await axios.post(
+        url,
+        requestPayload,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      console.log('WhatsApp template message sent successfully:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error sending WhatsApp template message:', 
+        error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+      throw error;
+    }
+  }
+
   if (isLoading) {
     return (
       <Card className="w-full">
@@ -307,6 +527,27 @@ export default function SourceDistribution() {
           <FileTextIcon className="h-5 w-5" />
           Lead Sources
         </CardTitle>
+        {messageLimit > 0 && (
+          <div className="text-sm text-gray-700 mt-1 flex items-center">
+            <span>
+              Daily message limit: {messagesUsedToday} / {messageLimit} used
+              {messagesUsedToday >= messageLimit && (
+                <span className="text-red-600 ml-2 font-semibold">
+                  Limit reached!
+                </span>
+              )}
+            </span>
+            <div 
+              className="ml-2 h-2 w-20 bg-gray-200 rounded-full overflow-hidden"
+              title={`${messagesUsedToday} of ${messageLimit} messages used today`}
+            >
+              <div 
+                className={`h-full ${messagesUsedToday >= messageLimit ? 'bg-red-500' : 'bg-green-500'}`} 
+                style={{ width: `${Math.min(100, (messagesUsedToday / messageLimit) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         {sourceData.length === 0 ? (
@@ -378,7 +619,14 @@ export default function SourceDistribution() {
                       {/* Initiate button */}
                       <Button
                         onClick={() => handleInitiateConversations(source.source)}
-                        disabled={source.inProgress || initiatingSource !== null || !templateId}
+                        disabled={
+                          source.inProgress || 
+                          initiatingSource !== null || 
+                          !templateId || 
+                          !templateLanguage || 
+                          !whatsappPhoneId ||
+                          messagesUsedToday >= messageLimit
+                        }
                         size="sm"
                         className="mt-2 text-white font-medium"
                         style={{
@@ -391,6 +639,11 @@ export default function SourceDistribution() {
                           <>
                             <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
                             <span className={source.contacted === 0 ? "text-white" : "text-gray-800"}>Sending...</span>
+                          </>
+                        ) : messagesUsedToday >= messageLimit ? (
+                          <>
+                            <AlertTriangleIcon className="mr-2 h-4 w-4" />
+                            <span className="text-gray-800">Daily Limit Reached</span>
                           </>
                         ) : source.contacted === 0 ? (
                           <>
@@ -414,6 +667,27 @@ export default function SourceDistribution() {
                         <p className="text-xs text-amber-600 mt-1 flex items-center">
                           <AlertTriangleIcon className="h-3 w-3 mr-1" />
                           Set a template ID in settings first
+                        </p>
+                      )}
+                      
+                      {templateId && !templateLanguage && (
+                        <p className="text-xs text-amber-600 mt-1 flex items-center">
+                          <AlertTriangleIcon className="h-3 w-3 mr-1" />
+                          Set a template language in settings first
+                        </p>
+                      )}
+                      
+                      {templateId && templateLanguage && !whatsappPhoneId && (
+                        <p className="text-xs text-amber-600 mt-1 flex items-center">
+                          <AlertTriangleIcon className="h-3 w-3 mr-1" />
+                          Set your WhatsApp Phone ID in settings first
+                        </p>
+                      )}
+                      
+                      {templateId && messageLimit > 0 && messagesUsedToday >= messageLimit * 0.8 && messagesUsedToday < messageLimit && (
+                        <p className="text-xs text-amber-600 mt-1 flex items-center">
+                          <AlertTriangleIcon className="h-3 w-3 mr-1" />
+                          Close to daily limit ({messagesUsedToday}/{messageLimit})
                         </p>
                       )}
                     </div>
