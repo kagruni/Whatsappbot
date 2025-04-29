@@ -128,18 +128,22 @@ export async function checkDailyMessageLimit(userId: string, limit: number): Pro
 export async function recordConversation(
   userId: string, 
   leadId: string, 
-  templateId: string,
+  templateId: string | null,
   language: string,
   messageId: string,
-  status: 'sent' | 'failed' = 'sent'
+  status: 'sent' | 'failed' = 'sent',
+  messageContent: string = '',
+  direction: 'inbound' | 'outbound' = 'outbound',
+  messageType: 'template' | 'text' = 'template'
 ): Promise<void> {
-  if (!userId || !leadId || !templateId || !language || !messageId) {
+  if (!userId || !leadId || !messageId) {
     console.error('Missing required parameters for recordConversation', {
       hasUserId: !!userId,
       hasLeadId: !!leadId,
       hasTemplateId: !!templateId,
       hasLanguage: !!language,
-      hasMessageId: !!messageId
+      hasMessageId: !!messageId,
+      hasMessageContent: !!messageContent
     });
     throw new Error('Missing required parameters for recording conversation');
   }
@@ -157,7 +161,10 @@ export async function recordConversation(
         language,
         message_id: messageId,
         status,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        message_content: messageContent,
+        direction,
+        message_type: messageType
       });
     
     if (error) {

@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import userSettings from '../userSettings';
+import { supabase } from './supabase';
 
 // Keep the important maps and variables
 const conversationHistory = new Map();
@@ -131,12 +132,72 @@ export async function handleMessage(message) {
     } else {
       console.log(`Using assigned user ${userId} for phone ${phoneNumber} from lead info`);
     }
+
+    // Find or create a lead ID for this phone number
+    let leadId;
+    try {
+      const { data: existingLead } = await supabase
+        .from('leads')
+        .select('id')
+        .eq('phone_number', phoneNumber)
+        .single();
+      
+      if (existingLead) {
+        leadId = existingLead.id;
+      } else {
+        // Create a new lead if none exists
+        const { data: newLead, error } = await supabase
+          .from('leads')
+          .insert({
+            name: leadData.name || 'WhatsApp User',
+            phone_number: phoneNumber,
+            status: 'New',
+            user_id: userId
+          })
+          .select('id')
+          .single();
+        
+        if (error) throw error;
+        leadId = newLead.id;
+      }
+    } catch (error) {
+      console.error('Error finding/creating lead:', error);
+      throw error;
+    }
     
-    let userHistory = conversationHistory.get(phoneNumber) || [];
-
-    userHistory.push({ role: "user", content: userMessage });
-    userHistory = userHistory.slice(-10); // Keep last 10 messages
-
+    // Store the incoming message in the database
+    const { data: messageRecord } = await supabase
+      .from('lead_conversations')
+      .insert({
+        user_id: userId,
+        lead_id: leadId,
+        message_id: message.id || crypto.randomUUID(),
+        message_content: userMessage,
+        direction: 'inbound',
+        message_type: 'text',
+        created_at: new Date().toISOString(),
+        status: 'delivered'
+      })
+      .select('id')
+      .single();
+    
+    // Get conversation history from database (last 10 messages)
+    const { data: conversationHistory } = await supabase
+      .from('lead_conversations')
+      .select('message_content, direction, created_at')
+      .eq('lead_id', leadId)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    // Format the messages for the OpenAI API
+    let userHistory = conversationHistory
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(msg => ({
+        role: msg.direction === 'inbound' ? 'user' : 'assistant',
+        content: msg.message_content
+      }));
+    
     // Get user-specific system prompt
     const systemPrompt = await userSettings.getSystemPromptForUser(userId);
     
@@ -147,9 +208,20 @@ export async function handleMessage(message) {
     // Generate AI response using user-specific settings
     const aiResponse = await generateAIResponseForUser(userHistory, systemPrompt, openai, model);
     
-    userHistory.push({ role: "assistant", content: aiResponse });
-    conversationHistory.set(phoneNumber, userHistory);
-
+    // Record the AI response in the database
+    await supabase
+      .from('lead_conversations')
+      .insert({
+        user_id: userId,
+        lead_id: leadId,
+        message_id: crypto.randomUUID(),
+        message_content: aiResponse,
+        direction: 'outbound',
+        message_type: 'text',
+        created_at: new Date().toISOString(),
+        status: 'sent'
+      });
+    
     // Send WhatsApp message using user-specific settings
     await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse);
     await markLeadAsContacted(phoneNumber);
@@ -159,7 +231,7 @@ export async function handleMessage(message) {
       console.log(`Trigger words detected for ${phoneNumber}. Lead is interested.`);
       // Handle interested leads (add your logic here)
     }
-
+    
     console.log('Message handling completed successfully');
     return true;
   } catch (error) {
