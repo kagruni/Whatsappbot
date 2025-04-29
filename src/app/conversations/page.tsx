@@ -662,7 +662,7 @@ export default function ConversationsPage() {
                             Template
                           </div>
                         )}
-                        <p style={{ margin: 0, marginBottom: '0.25rem' }}>{message.text}</p>
+                        <p style={{ margin: 0, marginBottom: '0.25rem', color: '#333333' }}>{message.text}</p>
                         <span style={{ 
                           fontSize: '0.7rem', 
                           color: '#6b7280',
