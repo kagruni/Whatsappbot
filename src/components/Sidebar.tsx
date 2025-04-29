@@ -12,7 +12,8 @@ import {
   HiOutlineLogout,
   HiOutlineMenuAlt2,
   HiOutlineX,
-  HiOutlineUser
+  HiOutlineUser,
+  HiOutlineMail
 } from 'react-icons/hi';
 import { useAuth } from '../context/AuthContext';
 
@@ -52,6 +53,7 @@ export default function Sidebar() {
     { label: 'Dashboard', href: '/', icon: <HiOutlineHome style={{ height: '1.25rem', width: '1.25rem' }} /> },
     { label: 'Conversations', href: '/conversations', icon: <HiOutlineChat style={{ height: '1.25rem', width: '1.25rem' }} /> },
     { label: 'Leads', href: '/leads', icon: <HiOutlineUsers style={{ height: '1.25rem', width: '1.25rem' }} /> },
+    { label: 'Outreach', href: '/outreach', icon: <HiOutlineMail style={{ height: '1.25rem', width: '1.25rem' }} /> },
     { label: 'Analytics', href: '/analytics', icon: <HiOutlineDocumentText style={{ height: '1.25rem', width: '1.25rem' }} /> },
     { label: 'Settings', href: '/settings', icon: <HiOutlineCog style={{ height: '1.25rem', width: '1.25rem' }} /> },
     { label: 'Profile', href: '/profile', icon: <HiOutlineUser style={{ height: '1.25rem', width: '1.25rem' }} /> },
