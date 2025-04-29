@@ -8,6 +8,7 @@ export interface UserSettings {
   openai_api_key?: string;
   ai_model?: string;
   system_prompt?: string;
+  message_limit_24h?: number;
 }
 
 // Client-side functions

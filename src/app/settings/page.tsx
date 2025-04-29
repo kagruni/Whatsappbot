@@ -92,6 +92,7 @@ export default function SettingsPage() {
   const [whatsappPhoneId, setWhatsappPhoneId] = useState('');
   const [whatsappTemplateId, setWhatsappTemplateId] = useState('');
   const [verifyToken, setVerifyToken] = useState('');
+  const [messageLimit, setMessageLimit] = useState(30);
   const [openaiKey, setOpenaiKey] = useState('');
   const [aiModel, setAiModel] = useState('gpt-4.1-mini');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -116,6 +117,7 @@ export default function SettingsPage() {
       if (settings) {
         setWhatsappPhoneId(settings.whatsapp_phone_id || '');
         setWhatsappTemplateId(settings.whatsapp_template_id || '');
+        setMessageLimit(settings.message_limit_24h || 30);
         setOpenaiKey(settings.openai_api_key ? '••••••••••••••••••••••••••••••' : '');
         setAiModel(settings.ai_model || 'gpt-4.1-mini');
         setSystemPrompt(settings.system_prompt || '');
@@ -138,7 +140,8 @@ export default function SettingsPage() {
       setSaving(true);
       await saveUserSettings({
         whatsapp_phone_id: whatsappPhoneId,
-        whatsapp_template_id: whatsappTemplateId
+        whatsapp_template_id: whatsappTemplateId,
+        message_limit_24h: messageLimit
       });
       toast.success('WhatsApp settings saved successfully');
     } catch (error) {
@@ -311,6 +314,23 @@ export default function SettingsPage() {
                             />
                             <Text className="text-xs text-gray-600 mt-1.5">
                               The ID of your approved message template from Meta
+                            </Text>
+                          </div>
+                        </motion.div>
+                        
+                        <motion.div variants={itemVariants}>
+                          <div>
+                            <Label className="text-gray-700 mb-1.5 block">24-Hour Message Limit</Label>
+                            <Input 
+                              type="number"
+                              placeholder="Enter message limit" 
+                              value={messageLimit}
+                              onChange={(e) => setMessageLimit(parseInt(e.target.value) || 30)}
+                              className="border-gray-200 text-gray-800"
+                              min={1}
+                            />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              Maximum number of messages that can be sent in a 24-hour period
                             </Text>
                           </div>
                         </motion.div>
