@@ -4,13 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { FileIcon, UsersIcon, FileTextIcon, MessageSquareIcon, AlertTriangleIcon, CheckIcon } from 'lucide-react';
+import { FileIcon, UsersIcon, FileTextIcon, MessageSquareIcon, AlertTriangleIcon, CheckIcon, EyeIcon, ReplyIcon } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Lead } from '@/types/leads';
 import { toast } from 'sonner';
 import supabase from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
+import { subscribeToStatusChanges, fetchMessageStatusData, type LeadStatusData } from '@/services/messageStatusService';
 
 interface SourceData {
   source: string;
@@ -18,6 +19,8 @@ interface SourceData {
   color: string;
   contacted: number;
   failed: number;
+  read: number;
+  replied: number;
   inProgress: boolean;
 }
 
@@ -72,6 +75,7 @@ export default function SourceDistribution() {
   const [whatsappPhoneId, setWhatsappPhoneId] = useState<string | null>(null);
   const [templateImageUrl, setTemplateImageUrl] = useState<string | null>(null);
   const { user } = useAuth();
+  const [lastStatusUpdate, setLastStatusUpdate] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -140,7 +144,7 @@ export default function SourceDistribution() {
   const fetchLeadSourceData = async () => {
     setIsLoading(true);
     try {
-      // Fetch leads from Supabase
+      // Fetch leads from Supabase to get basic counts
       const { data, error } = await supabase
         .from('leads')
         .select('*')
@@ -162,20 +166,38 @@ export default function SourceDistribution() {
           }
         });
         
+        // Directly fetch status data from lead_conversations table to get accurate read/reply counts
+        const statusData = await fetchMessageStatusData(user?.id as string);
+        
         // Transform into SourceData array with assigned colors and contact stats
         const sourceDataArray: SourceData[] = Object.entries(leadsBySource)
           .map(([source, leads], index) => {
-            // Count contacted and failed for each source based on lead status
+            // Initialize counters
             let contacted = 0;
             let failed = 0;
+            let read = 0;
+            let replied = 0;
             
+            // Count basic status info from lead status
             leads.forEach(lead => {
               if (lead.status === 'Contacted') {
                 contacted++;
+              } else if (lead.status === 'Replied') {
+                contacted++;
+                replied++;
               } else if (lead.status === 'Failed') {
                 failed++;
               }
             });
+            
+            // Override with accurate read/reply counts from status data
+            if (statusData && statusData[source]) {
+              read = statusData[source].read;
+              // For other counts, use the maximum
+              replied = Math.max(replied, statusData[source].replied);
+              contacted = Math.max(contacted, statusData[source].contacted);
+              failed = Math.max(failed, statusData[source].failed);
+            }
             
             return {
               source,
@@ -183,6 +205,8 @@ export default function SourceDistribution() {
               color: colors[index % colors.length],
               contacted,
               failed,
+              read,
+              replied,
               inProgress: false
             };
           })
@@ -198,10 +222,10 @@ export default function SourceDistribution() {
       // Use mock data for development
       if (process.env.NODE_ENV === 'development') {
         const mockSourceData: SourceData[] = [
-          { source: 'website_leads.csv', count: 42, color: colors[0], contacted: 25, failed: 3, inProgress: false },
-          { source: 'linkedin_campaign.csv', count: 28, color: colors[1], contacted: 15, failed: 2, inProgress: false },
-          { source: 'event_contacts.csv', count: 17, color: colors[2], contacted: 0, failed: 0, inProgress: false },
-          { source: 'partner_referrals.csv', count: 13, color: colors[3], contacted: 8, failed: 1, inProgress: false },
+          { source: 'website_leads.csv', count: 42, color: colors[0], contacted: 25, failed: 3, read: 15, replied: 8, inProgress: false },
+          { source: 'linkedin_campaign.csv', count: 28, color: colors[1], contacted: 15, failed: 2, read: 10, replied: 6, inProgress: false },
+          { source: 'event_contacts.csv', count: 17, color: colors[2], contacted: 0, failed: 0, read: 0, replied: 0, inProgress: false },
+          { source: 'partner_referrals.csv', count: 13, color: colors[3], contacted: 8, failed: 1, read: 5, replied: 3, inProgress: false },
         ];
         setSourceData(mockSourceData);
         setTotalLeads(100);
@@ -211,6 +235,66 @@ export default function SourceDistribution() {
       setIsLoading(false);
     }
   };
+
+  // Add a refresh timer to automatically update the data
+  useEffect(() => {
+    if (user) {
+      // First do an immediate fetch
+      fetchLeadSourceData();
+      
+      // Set up a refresh interval to update the data more frequently to catch status changes
+      const refreshInterval = setInterval(() => {
+        console.log("Auto-refreshing lead source data to check for status updates");
+        fetchLeadSourceData();
+      }, 10000); // 10 seconds instead of 30 for quicker status updates
+      
+      // Clean up the interval on component unmount
+      return () => clearInterval(refreshInterval);
+    }
+  }, [user]);
+
+  // Add a new useEffect for real-time updates
+  useEffect(() => {
+    if (user) {
+      console.log("Setting up real-time subscription to message status changes");
+      
+      // Subscribe to status changes with real-time updates
+      const unsubscribe = subscribeToStatusChanges(user.id, (statusData) => {
+        console.log("Received real-time status update", statusData);
+        
+        // Update the last status update time
+        setLastStatusUpdate(new Date().toLocaleTimeString());
+        
+        // Update the UI with the new status data
+        setSourceData(prevData => {
+          // If we don't have source data yet, don't update
+          if (!prevData || prevData.length === 0) return prevData;
+          
+          // Create a copy of the current source data
+          return prevData.map(source => {
+            // If we have status data for this source, update it
+            if (statusData[source.source]) {
+              const newStatusData = statusData[source.source];
+              return {
+                ...source,
+                read: newStatusData.read,
+                replied: newStatusData.replied,
+                contacted: Math.max(source.contacted, newStatusData.contacted),
+                failed: Math.max(source.failed, newStatusData.failed)
+              };
+            }
+            return source;
+          });
+        });
+      });
+      
+      // Clean up subscription when component unmounts
+      return () => {
+        console.log("Cleaning up real-time subscription");
+        unsubscribe();
+      };
+    }
+  }, [user]);
 
   const handleInitiateConversations = async (source: string) => {
     if (!templateId) {
@@ -488,27 +572,48 @@ export default function SourceDistribution() {
           <FileTextIcon className="h-5 w-5" />
           Lead Sources
         </CardTitle>
-        {messageLimit > 0 && (
-          <div className="text-sm text-gray-700 mt-1 flex items-center">
-            <span>
-              Daily message limit: {messagesUsedToday} / {messageLimit} used
-              {messagesUsedToday >= messageLimit && (
-                <span className="text-red-600 ml-2 font-semibold">
-                  Limit reached!
-                </span>
-              )}
-            </span>
-            <div 
-              className="ml-2 h-2 w-20 bg-gray-200 rounded-full overflow-hidden"
-              title={`${messagesUsedToday} of ${messageLimit} messages used today`}
-            >
+        <div className="flex items-center justify-between">
+          {messageLimit > 0 && (
+            <div className="text-sm text-gray-700 mt-1 flex items-center">
+              <span>
+                Daily message limit: {messagesUsedToday} / {messageLimit} used
+                {messagesUsedToday >= messageLimit && (
+                  <span className="text-red-600 ml-2 font-semibold">
+                    Limit reached!
+                  </span>
+                )}
+              </span>
               <div 
-                className={`h-full ${messagesUsedToday >= messageLimit ? 'bg-red-500' : 'bg-green-500'}`} 
-                style={{ width: `${Math.min(100, (messagesUsedToday / messageLimit) * 100)}%` }}
-              />
+                className="ml-2 h-2 w-20 bg-gray-200 rounded-full overflow-hidden"
+                title={`${messagesUsedToday} of ${messageLimit} messages used today`}
+              >
+                <div 
+                  className={`h-full ${messagesUsedToday >= messageLimit ? 'bg-red-500' : 'bg-green-500'}`} 
+                  style={{ width: `${Math.min(100, (messagesUsedToday / messageLimit) * 100)}%` }}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          {lastStatusUpdate && (
+            <div className="text-xs text-gray-500 ml-2">
+              Last status update: {lastStatusUpdate}
+            </div>
+          )}
+          <Button 
+            variant="ghost" 
+            size="sm"
+            className="text-gray-600"
+            onClick={() => fetchLeadSourceData()}
+            title="Refresh data"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-refresh-cw">
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+              <path d="M21 3v5h-5"></path>
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+              <path d="M3 21v-5h5"></path>
+            </svg>
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {sourceData.length === 0 ? (
@@ -562,8 +667,70 @@ export default function SourceDistribution() {
                           <span className="text-red-600 font-semibold">{source.failed}</span>
                         </div>
                       </div>
+
+                      {/* Read and Reply stats */}
+                      {source.contacted > 0 && (
+                        <div className="grid grid-cols-2 gap-2 text-gray-800 mt-1">
+                          <div className="flex items-center gap-1">
+                            <EyeIcon className="h-3 w-3 text-blue-600" />
+                            <div className="flex flex-col">
+                              <span className="text-xs text-gray-600">Read</span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-blue-600 font-semibold">{source.read}</span>
+                                <span className="text-xs text-gray-500">
+                                  ({source.contacted > 0 ? Math.round((source.read / source.contacted) * 100) : 0}%)
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <ReplyIcon className="h-3 w-3 text-indigo-600" />
+                            <div className="flex flex-col">
+                              <span className="text-xs text-gray-600">Replied</span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-indigo-600 font-semibold">{source.replied}</span>
+                                <span className="text-xs text-gray-500">
+                                  ({source.contacted > 0 ? Math.round((source.replied / source.contacted) * 100) : 0}%)
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       
-                      {/* Progress bar for contacted leads */}
+                      {/* Read progress bar */}
+                      {source.contacted > 0 && (
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span>Read Rate</span>
+                            <span>{source.contacted > 0 ? Math.round((source.read / source.contacted) * 100) : 0}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div 
+                              className="bg-blue-500 h-2 rounded-full"
+                              style={{ width: `${source.contacted > 0 ? (source.read / source.contacted) * 100 : 0}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Reply progress bar */}
+                      {source.contacted > 0 && (
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span>Reply Rate</span>
+                            <span>{source.contacted > 0 ? Math.round((source.replied / source.contacted) * 100) : 0}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div 
+                              className="bg-indigo-500 h-2 rounded-full"
+                              style={{ width: `${source.contacted > 0 ? (source.replied / source.contacted) * 100 : 0}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Contact progress bar */}
                       <div>
                         <div className="flex justify-between text-xs mb-1">
                           <span>Contact Progress</span>

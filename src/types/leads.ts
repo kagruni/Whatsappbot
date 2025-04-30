@@ -3,9 +3,10 @@ export interface Lead {
   name: string;
   phone: string;
   email?: string;
-  status: string;
+  status: 'New' | 'Contacted' | 'Replied' | 'Failed' | 'Converted' | string;
   source: string;
   created_at: string;
+  message_read?: boolean;
   title?: string;
   first_name?: string;
   last_name?: string;

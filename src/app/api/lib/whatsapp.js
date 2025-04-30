@@ -93,14 +93,19 @@ export async function processWhatsAppWebhook(body) {
         }
 
         if (change.value.statuses) {
-          console.log('Received status update:', JSON.stringify(change.value.statuses, null, 2));
+          console.log('====== RECEIVED STATUS UPDATES ======');
+          console.log('Status updates:', JSON.stringify(change.value.statuses, null, 2));
+          
           for (const status of change.value.statuses) {
             try {
+              console.log(`Processing status update for message ${status.id}: ${status.status}`);
               await handleMessageStatus(status);
             } catch (statusError) {
               console.error('Error handling message status:', statusError);
             }
           }
+          
+          console.log('====== END STATUS UPDATES ======');
         }
       }
     }
@@ -433,24 +438,57 @@ export async function handleMessage(message) {
       })
       .select('id')
       .single();
+
+    // Update lead status to "Replied" if a lead ID was found
+    if (leadId) {
+      try {
+        // Update lead status in database
+        const { data, error } = await supabase
+          .from('leads')
+          .update({ 
+            status: 'Replied'
+          })
+          .eq('id', leadId);
+          
+        if (error) {
+          console.error('Error updating lead status to Replied:', error);
+        } else {
+          console.log(`Updated lead ${leadId} status to Replied`);
+        }
+        
+        // Also update local status file
+        await markLeadAsContacted(phoneNumber, 'Replied');
+      } catch (updateError) {
+        console.error('Error updating lead status to Replied:', updateError);
+      }
+    }
     
     // Get conversation history from database (last 10 messages)
     const { data: conversationHistory } = await supabase
       .from('lead_conversations')
       .select('message_content, direction, created_at')
       .eq('lead_id', leadId)
-      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(10);
     
-    // Format the messages for the OpenAI API
-    let userHistory = conversationHistory
-      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-      .map(msg => ({
+    // Format as OpenAI messages
+    let userHistory = [];
+    if (conversationHistory && conversationHistory.length > 0) {
+      // We need to reverse to get chronological order
+      const chronologicalHistory = [...conversationHistory].reverse();
+      
+      userHistory = chronologicalHistory.map(msg => ({
         role: msg.direction === 'inbound' ? 'user' : 'assistant',
         content: msg.message_content
       }));
-    
+      
+      console.log(`Retrieved ${userHistory.length} messages from conversation history`);
+    } else {
+      // If no history, just use this message
+      userHistory = [{ role: 'user', content: userMessage }];
+      console.log('No conversation history found, using current message only');
+    }
+
     // Get user-specific system prompt
     const systemPrompt = await userSettings.getSystemPromptForUser(userId);
     
@@ -460,21 +498,6 @@ export async function handleMessage(message) {
     
     // Generate AI response using user-specific settings
     const aiResponse = await generateAIResponseForUser(userHistory, systemPrompt, openai, model);
-    
-    // Record the AI response in the database
-    await supabase
-      .from('lead_conversations')
-      .insert({
-        user_id: userId,
-        lead_id: leadId,
-        message_id: crypto.randomUUID(),
-        message_content: aiResponse,
-        direction: 'outbound',
-        message_type: 'text',
-        template_id: '',
-        created_at: new Date().toISOString(),
-        status: 'sent'
-      });
     
     // Send WhatsApp message using user-specific settings
     await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse);
@@ -820,7 +843,7 @@ export async function markLeadAsContacted(phone, status = 'contacted') {
 export async function handleMessageStatus(status) {
   try {
     const { id, status: messageStatus, recipient_id } = status;
-    console.log(`Message ${id} to ${recipient_id} status: ${messageStatus}`);
+    console.log(`Message ${id} to ${recipient_id} status update: ${messageStatus}`);
     
     // Only process delivered, read, and failed statuses
     if (!['delivered', 'read', 'failed'].includes(messageStatus)) {
@@ -832,7 +855,7 @@ export async function handleMessageStatus(status) {
       .from('lead_conversations')
       .update({ status: messageStatus })
       .eq('message_id', id)
-      .select('id, lead_id, user_id');
+      .select('id, lead_id, user_id, message_type, direction, status');
       
     if (error) {
       console.error(`Error updating message status for message ${id}:`, error);
@@ -840,7 +863,47 @@ export async function handleMessageStatus(status) {
     }
     
     if (data && data.length > 0) {
-      console.log(`Updated status for message ${id} to ${messageStatus} (lead: ${data[0].lead_id})`);
+      // Log when we have a message status change, especially to "read"
+      if (messageStatus === 'read') {
+        console.log(`==== MESSAGE READ CONFIRMATION ====`);
+        console.log(`Message ${id} (lead: ${data[0].lead_id}) status updated to READ`);
+        console.log(`Message details:`, {
+          messageId: id,
+          leadId: data[0].lead_id,
+          type: data[0].message_type,
+          direction: data[0].direction,
+          previousStatus: data[0].status
+        });
+        console.log(`====================================`);
+      } else {
+        console.log(`Updated status for message ${id} to ${messageStatus} (lead: ${data[0].lead_id})`);
+      }
+      
+      // If the message was read, also update the lead's message_read flag
+      // ONLY update for 'read' status, not for 'delivered'
+      if (messageStatus === 'read' && data[0].lead_id) {
+        try {
+          // First, verify that this message is for a template (not a reply)
+          if (data[0].direction === 'outbound' && data[0].message_type === 'template') {
+            console.log(`Updating message_read flag for lead ${data[0].lead_id} (outbound template message)`);
+            
+            const { error: leadUpdateError } = await supabase
+              .from('leads')
+              .update({ message_read: true })
+              .eq('id', data[0].lead_id);
+              
+            if (leadUpdateError) {
+              console.error(`Error updating lead message_read flag for lead ${data[0].lead_id}:`, leadUpdateError);
+            } else {
+              console.log(`Updated message_read flag for lead ${data[0].lead_id}`);
+            }
+          } else {
+            console.log(`Not updating message_read flag - not an outbound template message`);
+          }
+        } catch (leadError) {
+          console.error(`Exception updating lead message_read flag:`, leadError);
+        }
+      }
     } else {
       console.log(`No message found with ID ${id} for status update`);
     }
