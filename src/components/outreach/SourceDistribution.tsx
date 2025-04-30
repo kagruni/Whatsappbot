@@ -120,11 +120,12 @@ export default function SourceDistribution() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      // Query conversations created in the last 24 hours
+      // Query conversations created in the last 24 hours with message_type = 'template'
       const { data, error } = await supabase
         .from('lead_conversations')
         .select('id')
         .eq('user_id', user.id)
+        .eq('message_type', 'template') // Only count template messages
         .gte('created_at', today.toISOString());
 
       if (error) {
@@ -134,6 +135,16 @@ export default function SourceDistribution() {
 
       // Count the records in JavaScript
       const count = data ? data.length : 0;
+      
+      // Check if the count has reset (was higher before, now lower)
+      if (count < messagesUsedToday) {
+        console.log(`Daily message count reset detected: ${messagesUsedToday} → ${count}`);
+        toast.info('Daily message limit has reset. You can continue contacting leads.', {
+          id: 'daily-limit-reset',
+          duration: 5000
+        });
+      }
+      
       setMessagesUsedToday(count);
       
     } catch (error: any) {
@@ -250,6 +261,42 @@ export default function SourceDistribution() {
       
       // Clean up the interval on component unmount
       return () => clearInterval(refreshInterval);
+    }
+  }, [user]);
+
+  // Add a new useEffect for midnight refresh to reset daily limits
+  useEffect(() => {
+    if (user) {
+      // Function to schedule the next midnight refresh
+      const scheduleNextMidnightRefresh = () => {
+        const now = new Date();
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 5, 0); // 00:00:05 AM to ensure we're past midnight
+        
+        const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+        
+        console.log(`Scheduling message limit refresh in ${Math.round(timeUntilMidnight / 1000 / 60)} minutes at midnight`);
+        
+        // Set timeout for midnight
+        const midnightTimeout = setTimeout(() => {
+          console.log("Midnight reached - refreshing message count and lead data");
+          fetchMessageCount();
+          fetchLeadSourceData();
+          
+          // Schedule for next day once completed
+          scheduleNextMidnightRefresh();
+        }, timeUntilMidnight);
+        
+        // Return cleanup function
+        return () => clearTimeout(midnightTimeout);
+      };
+      
+      // Start the scheduling cycle
+      const clearScheduler = scheduleNextMidnightRefresh();
+      
+      // Clean up on component unmount
+      return clearScheduler;
     }
   }, [user]);
 
@@ -702,8 +749,8 @@ export default function SourceDistribution() {
                       {source.contacted > 0 && (
                         <div>
                           <div className="flex justify-between text-xs mb-1">
-                            <span>Read Rate</span>
-                            <span>{source.contacted > 0 ? Math.round((source.read / source.contacted) * 100) : 0}%</span>
+                            <span className="text-gray-700">Read Rate</span>
+                            <span className="text-gray-700">{source.contacted > 0 ? Math.round((source.read / source.contacted) * 100) : 0}%</span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2">
                             <div 
@@ -718,8 +765,8 @@ export default function SourceDistribution() {
                       {source.contacted > 0 && (
                         <div>
                           <div className="flex justify-between text-xs mb-1">
-                            <span>Reply Rate</span>
-                            <span>{source.contacted > 0 ? Math.round((source.replied / source.contacted) * 100) : 0}%</span>
+                            <span className="text-gray-700">Reply Rate</span>
+                            <span className="text-gray-700">{source.contacted > 0 ? Math.round((source.replied / source.contacted) * 100) : 0}%</span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2">
                             <div 
@@ -733,8 +780,8 @@ export default function SourceDistribution() {
                       {/* Contact progress bar */}
                       <div>
                         <div className="flex justify-between text-xs mb-1">
-                          <span>Contact Progress</span>
-                          <span>{source.count > 0 ? Math.round((source.contacted / source.count) * 100) : 0}%</span>
+                          <span className="text-gray-700">Contact Progress</span>
+                          <span className="text-gray-700">{source.count > 0 ? Math.round((source.contacted / source.count) * 100) : 0}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div 
@@ -753,10 +800,11 @@ export default function SourceDistribution() {
                           !templateId || 
                           !templateLanguage || 
                           !whatsappPhoneId ||
-                          messagesUsedToday >= messageLimit
+                          messagesUsedToday >= messageLimit ||
+                          source.contacted === source.count // Disable when all leads are contacted
                         }
                         size="sm"
-                        className="mt-2 text-white font-medium"
+                        className="mt-2 text-gray-800 font-medium"
                         style={{
                           backgroundColor: source.contacted === 0 ? WHATSAPP_GREEN : undefined,
                           border: source.contacted === 0 ? 'none' : undefined
@@ -765,8 +813,8 @@ export default function SourceDistribution() {
                       >
                         {source.inProgress ? (
                           <>
-                            <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-                            <span className={source.contacted === 0 ? "text-white" : "text-gray-800"}>Sending...</span>
+                            <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-gray-800 border-t-transparent"></div>
+                            <span className={source.contacted === 0 ? "text-gray-800" : "text-gray-800"}>Sending...</span>
                           </>
                         ) : messagesUsedToday >= messageLimit ? (
                           <>
@@ -776,7 +824,7 @@ export default function SourceDistribution() {
                         ) : source.contacted === 0 ? (
                           <>
                             <MessageSquareIcon className="mr-2 h-4 w-4" />
-                            <span className="text-white">Start Conversations</span>
+                            <span className="text-gray-800">Start Conversations</span>
                           </>
                         ) : source.contacted < source.count ? (
                           <>
@@ -809,6 +857,14 @@ export default function SourceDistribution() {
                         <p className="text-xs text-amber-600 mt-1 flex items-center">
                           <AlertTriangleIcon className="h-3 w-3 mr-1" />
                           Set your WhatsApp Phone ID in settings first
+                        </p>
+                      )}
+                      
+                      {/* Add notification for partial contacts due to daily limits */}
+                      {source.contacted > 0 && source.contacted < source.count && messagesUsedToday >= messageLimit && (
+                        <p className="text-xs text-amber-600 mt-1 flex items-center">
+                          <AlertTriangleIcon className="h-3 w-3 mr-1" />
+                          Partially contacted. Continue tomorrow when limit resets.
                         </p>
                       )}
                       
