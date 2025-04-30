@@ -97,6 +97,13 @@ async function getUserSettings(userId) {
     if (data) {
       console.log(`Found Supabase settings for user ${userId}`, JSON.stringify(data, null, 2));
       
+      // Debug system prompt specifically
+      console.log(`System prompt from database:`, {
+        rawValue: data.system_prompt,
+        length: data.system_prompt ? data.system_prompt.length : 0,
+        preview: data.system_prompt ? data.system_prompt.substring(0, 50) + '...' : 'null or empty'
+      });
+      
       // Map Supabase column names to our expected property names
       const mappedSettings = {
         userId: userId,
@@ -116,7 +123,9 @@ async function getUserSettings(userId) {
         hasPhoneId: !!mappedSettings.whatsappPhoneNumberId,
         phoneId: mappedSettings.whatsappPhoneNumberId,
         hasToken: !!mappedSettings.whatsappToken,
-        templateId: mappedSettings.templateId
+        templateId: mappedSettings.templateId,
+        hasSystemPrompt: !!mappedSettings.systemPrompt,
+        systemPromptLength: mappedSettings.systemPrompt ? mappedSettings.systemPrompt.length : 0
       });
       
       return mappedSettings;

@@ -63,11 +63,20 @@ async function updateUserSettings(userId, newSettings) {
 async function getSystemPromptForUser(userId) {
   const settings = await db.getUserSettings(userId);
   
+  console.log(`Retrieved system prompt for user ${userId}:`, {
+    hasSystemPrompt: !!settings.systemPrompt,
+    systemPromptLength: settings.systemPrompt ? settings.systemPrompt.length : 0,
+    isEmpty: !settings.systemPrompt || settings.systemPrompt.trim() === '',
+    preview: settings.systemPrompt ? settings.systemPrompt.substring(0, 50) + '...' : 'null or empty'
+  });
+  
   // Return custom system prompt if set, otherwise return default
   if (settings.systemPrompt && settings.systemPrompt.trim() !== '') {
+    console.log(`Using custom system prompt for user ${userId}`);
     return settings.systemPrompt;
   }
   
+  console.log(`No custom system prompt found for user ${userId}, using default system prompt`);
   return SYSTEM_MESSAGE;
 }
 

@@ -491,16 +491,82 @@ export async function handleMessage(message) {
 
     // Get user-specific system prompt
     const systemPrompt = await userSettings.getSystemPromptForUser(userId);
-    
+    console.log(`Retrieved system prompt for message handling:`, {
+      userId,
+      hasSystemPrompt: !!systemPrompt,
+      systemPromptLength: systemPrompt ? systemPrompt.length : 0,
+      preview: systemPrompt ? systemPrompt.substring(0, 50) + '...' : 'null or empty'
+    });
+
     // Get user-specific OpenAI instance and model
     const openai = await userSettings.getOpenAIForUser(userId);
     const model = await userSettings.getOpenAIModel(userId);
+    console.log(`Using OpenAI model for user ${userId}: ${model}`);
     
-    // Generate AI response using user-specific settings
-    const aiResponse = await generateAIResponseForUser(userHistory, systemPrompt, openai, model);
-    
-    // Send WhatsApp message using user-specific settings
-    await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse);
+    // Generate AI response
+    try {
+      console.log(`Generating AI response for lead ID ${leadId}, user ${userId}, phone ${phoneNumber}`);
+      // Get last 10 messages from the lead_conversations table
+      const { data: conversationHistory, error: historyError } = await supabase
+        .from('lead_conversations')
+        .select('*')
+        .eq('lead_id', leadId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (historyError) {
+        console.error('Error fetching conversation history:', historyError);
+      }
+
+      // Format messages for OpenAI
+      let messages = [];
+
+      if (conversationHistory && conversationHistory.length > 0) {
+        // Sort by created_at ascending
+        conversationHistory.sort((a, b) => 
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+        
+        console.log(`Found ${conversationHistory.length} previous messages in conversation history`);
+        
+        messages = conversationHistory.map(message => ({
+          role: message.direction === 'inbound' ? 'user' : 'assistant',
+          content: message.message_content
+        }));
+      } else {
+        console.log('No previous conversation history found');
+      }
+
+      // Add the current message (we don't need to add it again if it's already in the history)
+      // Check if the current message is already in the messages array
+      const currentMessageExists = messages.some(
+        msg => msg.role === 'user' && msg.content === userMessage
+      );
+      
+      if (!currentMessageExists) {
+        console.log('Adding current message to conversation history');
+        messages.push({
+          role: 'user',
+          content: userMessage
+        });
+      } else {
+        console.log('Current message already exists in conversation history');
+      }
+
+      console.log('Preparing to generate AI response with these messages:', 
+        messages.map(m => ({ role: m.role, content_preview: m.content.substring(0, 30) + '...' })));
+
+      // Generate AI response - passing userId to get user-specific prompt and model
+      const aiResponse = await generateAIResponseForUser(messages, userId);
+      console.log(`Generated AI response (${aiResponse.length} chars): "${aiResponse.substring(0, 100)}${aiResponse.length > 100 ? '...' : ''}"`);
+
+      // Send the AI response back to the user
+      console.log(`Sending AI response to WhatsApp for lead ID: ${leadId}`);
+      await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse, leadId);
+      console.log('AI response sent successfully');
+    } catch (error) {
+      console.error('Error generating or sending AI response:', error);
+    }
     
     // If we found a lead, update its status (but only if not already contacted)
     if (leadId) {
@@ -522,16 +588,25 @@ export async function handleMessage(message) {
 }
 
 // Generate AI response for user
-async function generateAIResponseForUser(userHistory, systemPrompt, openai, model) {
+async function generateAIResponseForUser(messages, userId) {
   try {
+    // Get user-specific OpenAI instance and model
+    const openai = await userSettings.getOpenAIForUser(userId);
+    const model = await userSettings.getOpenAIModel(userId);
+    // Get user-specific system prompt
+    const systemPrompt = await userSettings.getSystemPromptForUser(userId);
+    
     console.log(`Generating AI response with model: ${model}`);
+    console.log(`Using system prompt: ${systemPrompt ? systemPrompt.substring(0, 50) + '...' : 'Default system prompt'}`);
+    
+    // Create the full messages array with system prompt
+    const fullMessages = [
+      { role: 'system', content: systemPrompt || "You are a helpful assistant representing a business. Be friendly and professional." }
+    ].concat(messages);
     
     const response = await openai.chat.completions.create({
       model: model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...userHistory
-      ],
+      messages: fullMessages,
       max_tokens: 150
     });
     
@@ -543,8 +618,7 @@ async function generateAIResponseForUser(userHistory, systemPrompt, openai, mode
       message: error.message,
       type: error.type,
       code: error.code,
-      statusCode: error.status || error.statusCode,
-      model: model
+      statusCode: error.status || error.statusCode
     });
     
     // Fallback to a safe response if there's an error
@@ -553,7 +627,7 @@ async function generateAIResponseForUser(userHistory, systemPrompt, openai, mode
 }
 
 // Send WhatsApp message for user
-async function sendWhatsAppMessageForUser(userId, to, message) {
+async function sendWhatsAppMessageForUser(userId, to, message, leadId = null) {
   const phoneNumberId = await userSettings.getWhatsAppPhoneNumberId(userId);
   const token = await userSettings.getWhatsAppToken(userId);
   
@@ -563,7 +637,8 @@ async function sendWhatsAppMessageForUser(userId, to, message) {
     hasToken: !!token,
     tokenLength: token ? token.length : 0,
     recipient: to,
-    messageLength: message ? message.length : 0
+    messageLength: message ? message.length : 0,
+    hasLeadId: !!leadId
   });
   
   if (!phoneNumberId) {
@@ -574,9 +649,32 @@ async function sendWhatsAppMessageForUser(userId, to, message) {
     throw new Error(`WhatsApp Token not found for user ${userId}`);
   }
   
+  // If no leadId was provided, try to find one based on the phone number
+  if (!leadId) {
+    try {
+      console.log(`No lead ID provided, attempting to find one for phone ${to}`);
+      const strippedPhone = to.replace(/\D/g, '');
+      const { data: matchingLeads } = await supabase
+        .from('leads')
+        .select('id')
+        .or(`phone.ilike.%${strippedPhone.slice(-8)}%,phone.eq.${to}`);
+      
+      if (matchingLeads && matchingLeads.length > 0) {
+        leadId = matchingLeads[0].id;
+        console.log(`Found lead ID for outbound message: ${leadId}`);
+      } else {
+        console.log(`No lead found for phone ${to} when sending AI response`);
+      }
+    } catch (error) {
+      console.error('Error finding lead ID:', error);
+      // Continue without lead ID - the message will still be sent but not recorded
+    }
+  }
+  
   const url = `https://graph.facebook.com/v16.0/${phoneNumberId}/messages`;
 
   try {
+    // Send the message to WhatsApp
     const response = await axios.post(
       url,
       {
@@ -594,7 +692,40 @@ async function sendWhatsAppMessageForUser(userId, to, message) {
         }
       }
     );
+    
     console.log('Message sent successfully:', response.data);
+    
+    // Extract the message ID from the response
+    const messageId = response.data?.messages?.[0]?.id;
+    
+    // Save the outbound AI message to the lead_conversations table
+    if (leadId && messageId) {
+      const { data: messageRecord, error: messageError } = await supabase
+        .from('lead_conversations')
+        .insert({
+          user_id: userId,
+          lead_id: leadId,
+          message_id: messageId,
+          message_content: message,
+          direction: 'outbound',
+          message_type: 'text',
+          template_id: '',
+          created_at: new Date().toISOString(),
+          status: 'sent'
+        });
+      
+      if (messageError) {
+        console.error('Error storing AI message in database:', messageError);
+      } else {
+        console.log(`Successfully stored AI message in database with ID: ${messageId}`);
+      }
+    } else if (!leadId) {
+      console.log('Could not store AI message in database: missing lead ID');
+    } else if (!messageId) {
+      console.log('Could not store AI message in database: missing message ID from WhatsApp response');
+      console.log('WhatsApp response:', response.data);
+    }
+    
     return response.data;
   } catch (error) {
     console.error('Error sending WhatsApp message:', error.response ? error.response.data : error.message);
