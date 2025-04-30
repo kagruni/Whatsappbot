@@ -324,6 +324,59 @@ export default function SettingsPage() {
                           </div>
                         </motion.div>
                         
+                        <motion.div variants={cardVariants} className="mt-6 mb-4">
+                          <Card className="border border-blue-200 bg-blue-50 shadow-sm">
+                            <CardHeader className="pb-2">
+                              <CardTitle className="text-lg text-blue-800">
+                                <div className="flex items-center">
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  WhatsApp Template Variables
+                                </div>
+                              </CardTitle>
+                              <CardDescription className="text-blue-700">
+                                How to personalize your messages with lead data
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="text-sm text-blue-700 space-y-3">
+                                <p>You can use lead data in your WhatsApp templates using variable placeholders. In your Meta WhatsApp template, use variable syntax like <code className="bg-blue-100 px-1 rounded">{'{{'}<span>1</span>{'}}'}</code>, <code className="bg-blue-100 px-1 rounded">{'{{'}<span>2</span>{'}}'}</code>, etc.</p>
+                                <p className="font-medium mt-2">Available lead field variables:</p>
+                                <ul className="pl-5 list-disc space-y-1">
+                                  <li><code className="bg-blue-100 px-1 rounded">{'{{'}<span>1</span>{'}}'}</code> - Full Name</li>
+                                  <li><code className="bg-blue-100 px-1 rounded">{'{{'}<span>2</span>{'}}'}</code> - Email</li>
+                                  <li><code className="bg-blue-100 px-1 rounded">{'{{'}<span>3</span>{'}}'}</code> - Title/Position</li>
+                                  <li><code className="bg-blue-100 px-1 rounded">{'{{'}<span>4</span>{'}}'}</code> - First Name</li>
+                                  <li><code className="bg-blue-100 px-1 rounded">{'{{'}<span>5</span>{'}}'}</code> - Last Name</li>
+                                  <li><code className="bg-blue-100 px-1 rounded">{'{{'}<span>6</span>{'}}'}</code> - City</li>
+                                  <li><code className="bg-blue-100 px-1 rounded">{'{{'}<span>7</span>{'}}'}</code> - Company Name</li>
+                                </ul>
+                                <p className="mt-2">Example template text:</p>
+                                <div className="bg-white p-3 border border-blue-200 rounded-md mt-1 text-gray-800">
+                                  <p>Hello {'{{'}<span>4</span>{'}}'},</p>
+                                  <p className="mt-1">I noticed you work at {'{{'}<span>7</span>{'}}' } as a {'{{'}<span>3</span>{'}}' } in {'{{'}<span>6</span>{'}}'}</p>
+                                  <p className="mt-1">I'd like to connect about our services that might help you.</p>
+                                  <p className="mt-1">Best regards,<br/>Your Name</p>
+                                </div>
+                                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-800">
+                                  <p className="flex items-center font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Important:
+                                  </p>
+                                  <ul className="mt-2 pl-5 list-disc text-sm">
+                                    <li>Make sure your approved WhatsApp template has the exact number of variables you're using</li>
+                                    <li>Create and approve your template in the Meta Business Manager</li>
+                                    <li>Test your template before sending to all leads</li>
+                                  </ul>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </motion.div>
+                        
                         <motion.div variants={itemVariants}>
                           <div>
                             <Label className="text-gray-700 mb-1.5 block">WhatsApp Template Image URL</Label>

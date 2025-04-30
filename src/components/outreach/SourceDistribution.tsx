@@ -555,6 +555,29 @@ export default function SourceDistribution() {
         language
       });
       
+      // Find the lead to get all fields for template variables
+      const { data: lead, error: leadError } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', leadId)
+        .single();
+      
+      if (leadError) {
+        console.error('Error fetching lead details:', leadError);
+        throw new Error('Could not retrieve lead details for template variables');
+      }
+      
+      // Create a mapping for template variables
+      const templateVariables = {
+        1: lead.name || '', // Full Name
+        2: lead.email || '', // Email
+        3: lead.title || '', // Title/Position
+        4: lead.first_name || '', // First Name
+        5: lead.last_name || '', // Last Name
+        6: lead.city || '', // City
+        7: lead.company_name || '', // Company Name
+      };
+      
       // Instead of direct WhatsApp API call, use our server endpoint
       const response = await fetch('/api/whatsapp/send-template', {
         method: 'POST',
@@ -566,6 +589,7 @@ export default function SourceDistribution() {
           leadName,
           leadId,
           userId: user?.id, // Include the user ID for authentication fallback
+          templateVariables, // Pass all template variables to API
         }),
       });
       

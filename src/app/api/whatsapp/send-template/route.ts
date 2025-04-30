@@ -10,7 +10,7 @@ import {
 } from '@/lib/whatsapp-utils';
 
 // Helper function to create template components based on template name and parameters
-function createTemplateComponents(templateName: string, leadName: string | null = null, imageUrl: string | null = null) {
+function createTemplateComponents(templateName: string, leadName: string | null = null, imageUrl: string | null = null, templateVariables: Record<number, string> | null = null) {
   const components: any[] = [];
   
   // Handle specific templates based on their known structure
@@ -59,8 +59,22 @@ function createTemplateComponents(templateName: string, leadName: string | null 
     });
   }
   
-  // Add body component with lead name parameter if provided
-  if (leadName) {
+  // Add body component with template parameters if provided
+  if (templateVariables && Object.keys(templateVariables).length > 0) {
+    // Convert numbered variables to array of parameters in the correct order
+    const parameters = Object.entries(templateVariables)
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+      .map(([_, value]) => ({ type: 'text', text: value }));
+    
+    components.push({
+      type: 'body',
+      parameters
+    });
+    
+    console.log(`Created body component with ${parameters.length} parameters`);
+  } 
+  // Fallback to just using leadName if no template variables provided
+  else if (leadName) {
     components.push({
       type: 'body',
       parameters: [
@@ -78,13 +92,15 @@ export async function POST(request: Request) {
     
     // Get the request body
     const body = await request.json();
-    const { phoneNumber, leadName, leadId, userId: requestUserId } = body;
+    const { phoneNumber, leadName, leadId, userId: requestUserId, templateVariables } = body;
 
     console.log('Request body:', {
       hasPhoneNumber: !!phoneNumber,
       hasLeadName: !!leadName,
       hasLeadId: !!leadId,
-      hasRequestUserId: !!requestUserId
+      hasRequestUserId: !!requestUserId,
+      hasTemplateVariables: !!templateVariables,
+      templateVariablesCount: templateVariables ? Object.keys(templateVariables).length : 0
     });
 
     if (!phoneNumber) {
@@ -244,7 +260,7 @@ export async function POST(request: Request) {
         },
         // Use our universal helper function to create a template structure
         // that works with most WhatsApp templates
-        components: createTemplateComponents(templateId, leadName, imageUrl)
+        components: createTemplateComponents(templateId, leadName, imageUrl, templateVariables)
       }
     };
 
