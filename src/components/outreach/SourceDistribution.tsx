@@ -547,12 +547,15 @@ export default function SourceDistribution() {
   // Define the function to send WhatsApp template messages
   async function sendWhatsAppTemplateMessage(phoneNumber: string, templateName: string, language: string, leadId: string, leadName: string) {
     try {
-      console.log('Sending WhatsApp template message to:', {
+      console.log('WhatsApp Template Debug Info:', {
         phoneNumber,
         leadName,
         leadId,
         templateName,
-        language
+        language,
+        templateImageUrl,
+        whatsappPhoneId,
+        templateId
       });
       
       // Find the lead to get all fields for template variables
@@ -567,30 +570,61 @@ export default function SourceDistribution() {
         throw new Error('Could not retrieve lead details for template variables');
       }
       
-      // Create a mapping for template variables
-      const templateVariables = {
-        1: lead.name || '', // Full Name
-        2: lead.email || '', // Email
-        3: lead.title || '', // Title/Position
-        4: lead.first_name || '', // First Name
-        5: lead.last_name || '', // Last Name
-        6: lead.city || '', // City
-        7: lead.company_name || '', // Company Name
+      // Create a simplified payload for known template types
+      // Based on the template screenshot, we need to match EXACTLY what's expected
+      let requestData: any = {
+        phoneNumber,
+        leadId,
+        userId: user?.id,
+        templateId: templateName,
+        templateLanguage: language,
+        whatsappPhoneId,
+        // Only include name as the first parameter based on template screenshot
+        templateVariables: {
+          1: (lead.name || leadName || '').toString().trim()
+        },
+        // Explicitly define the components structure with header, body, and footer
+        explicitComponents: {
+          header: templateImageUrl ? {
+            type: 'header',
+            parameters: [
+              {
+                type: 'image',
+                image: {
+                  link: templateImageUrl
+                }
+              }
+            ]
+          } : null,
+          body: {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: (lead.name || leadName || '').toString().trim() }
+            ]
+          },
+          footer: {
+            type: 'footer',
+            parameters: []
+          }
+        }
       };
       
-      // Instead of direct WhatsApp API call, use our server endpoint
+      // Re-enable image support
+      if (templateImageUrl && templateImageUrl.trim() !== '') {
+        console.log('Template has image URL:', templateImageUrl);
+        requestData.templateImageUrl = templateImageUrl;
+      }
+      
+      // Log the full request data for debugging
+      console.log('WhatsApp API request data:', JSON.stringify(requestData, null, 2));
+      
+      // Send the request
       const response = await fetch('/api/whatsapp/send-template', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          phoneNumber,
-          leadName,
-          leadId,
-          userId: user?.id, // Include the user ID for authentication fallback
-          templateVariables, // Pass all template variables to API
-        }),
+        body: JSON.stringify(requestData),
       });
       
       const responseData = await response.json();
@@ -600,10 +634,43 @@ export default function SourceDistribution() {
         const errorMessage = responseData.error || `Server responded with status: ${response.status}`;
         console.error('WhatsApp API error:', errorMessage, responseData);
         
-        // Show the error to the user
-        toast.error(`Failed to send WhatsApp message: ${errorMessage}`);
-        
-        throw new Error(errorMessage);
+        // Try fallback approach if original fails
+        if (errorMessage.includes('Required parameter')) {
+          console.log('Attempting fallback approach for template message...');
+          
+          // Create a simplified fallback payload without image
+          const fallbackData = {
+            ...requestData,
+            templateImageUrl: undefined, // Remove image URL
+            needsHeaderComponent: false,
+            isFallback: true
+          };
+          
+          console.log('Using fallback data:', JSON.stringify(fallbackData, null, 2));
+          
+          // Try again with simplified payload
+          const fallbackResponse = await fetch('/api/whatsapp/send-template', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(fallbackData),
+          });
+          
+          const fallbackResponseData = await fallbackResponse.json();
+          
+          if (fallbackResponse.ok) {
+            console.log('Fallback approach succeeded:', fallbackResponseData);
+            return fallbackResponseData;
+          } else {
+            console.error('Fallback approach also failed:', fallbackResponseData);
+            throw new Error(errorMessage);
+          }
+        } else {
+          // Original error wasn't about missing parameters
+          toast.error(`Failed to send WhatsApp message: ${errorMessage}`);
+          throw new Error(errorMessage);
+        }
       }
       
       console.log('WhatsApp template message sent successfully:', responseData);

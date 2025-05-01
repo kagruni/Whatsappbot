@@ -13,6 +13,14 @@ import {
 function createTemplateComponents(templateName: string, leadName: string | null = null, imageUrl: string | null = null, templateVariables: Record<number, string> | null = null) {
   const components: any[] = [];
   
+  console.log('Creating template components for:', {
+    templateName,
+    hasLeadName: !!leadName,
+    hasImageUrl: !!imageUrl,
+    hasTemplateVariables: !!templateVariables,
+    templateVariablesKeys: templateVariables ? Object.keys(templateVariables) : []
+  });
+  
   // Handle specific templates based on their known structure
   if (templateName === 'hello_world') {
     // hello_world template typically has no parameters in the body
@@ -42,48 +50,84 @@ function createTemplateComponents(templateName: string, leadName: string | null 
     return components;
   }
   
-  // Default handling for other templates
-  
-  // Add header component with image if provided
+  // For all other templates with images, we must include a header component
   if (imageUrl) {
+    console.log('Adding image header component with URL:', imageUrl);
+    
+    // Make sure the URL is properly formatted and accessible
+    const formattedImageUrl = imageUrl.trim();
+    console.log('Using formatted image URL:', formattedImageUrl);
+    
+    // Ensure we're using the correct structure for header with image
     components.push({
       type: 'header',
       parameters: [
         {
           type: 'image',
           image: {
-            link: imageUrl
+            link: formattedImageUrl
           }
         }
       ]
     });
   }
   
-  // Add body component with template parameters if provided
+  // For the body component, always include it even if empty
+  // WhatsApp requires this component, even if it has no parameters
+  let bodyParameters: any[] = [];
+  
+  // Add template variables to body parameters if provided
   if (templateVariables && Object.keys(templateVariables).length > 0) {
-    // Convert numbered variables to array of parameters in the correct order
-    const parameters = Object.entries(templateVariables)
-      .sort(([a], [b]) => parseInt(a) - parseInt(b))
-      .map(([_, value]) => ({ type: 'text', text: value }));
-    
-    components.push({
-      type: 'body',
-      parameters
-    });
-    
-    console.log(`Created body component with ${parameters.length} parameters`);
+    bodyParameters = formatTemplateParameters(templateVariables);
+    console.log(`Using ${bodyParameters.length} formatted parameters for body`);
   } 
-  // Fallback to just using leadName if no template variables provided
+  // Fallback to just using leadName if no template variables provided but name exists
   else if (leadName) {
-    components.push({
-      type: 'body',
-      parameters: [
-        { type: 'text', text: leadName }
-      ]
-    });
+    bodyParameters = [{ type: 'text', text: leadName ? String(leadName).trim() : '' }];
+    console.log('Using leadName as single body parameter');
   }
   
+  // Always add the body component, even with empty parameters
+  // This is required by WhatsApp's API
+  components.push({
+    type: 'body',
+    parameters: bodyParameters
+  });
+  
+  // Some templates may also need a footer or buttons component
+  // For now we're not handling these, but they would be added here
+  
+  console.log('Final components structure:', JSON.stringify(components, null, 2));
   return components;
+}
+
+// Add a helper function to safely format template parameters
+function formatTemplateParameters(templateVariables: Record<number, string> | null) {
+  if (!templateVariables || Object.keys(templateVariables).length === 0) {
+    return [];
+  }
+  
+  try {
+    // Ensure all parameters are properly formatted as text
+    return Object.entries(templateVariables)
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+      .map(([_, value]: [string, any]) => {
+        // Ensure value is a non-empty string
+        const stringValue = value != null ? String(value).trim() : '';
+        
+        // Log each parameter for debugging
+        console.log(`Parameter value: "${stringValue}" (type: ${typeof value})`);
+        
+        return { 
+          type: 'text', 
+          text: stringValue
+        };
+      });
+  } catch (error) {
+    console.error('Error formatting template parameters:', error);
+    // Return empty array as fallback
+    return [];
+  }
 }
 
 export async function POST(request: Request) {
@@ -92,7 +136,21 @@ export async function POST(request: Request) {
     
     // Get the request body
     const body = await request.json();
-    const { phoneNumber, leadName, leadId, userId: requestUserId, templateVariables } = body;
+    const { 
+      phoneNumber, 
+      leadName, 
+      leadId, 
+      userId: requestUserId, 
+      templateVariables,
+      templateId: requestTemplateId,
+      templateLanguage: requestLanguage,
+      whatsappPhoneId: requestPhoneId,
+      templateImageUrl: requestImageUrl,
+      needsHeaderComponent = false,
+      isFallback = false,
+      skipImageHeader = false,
+      explicitComponents = null
+    } = body;
 
     console.log('Request body:', {
       hasPhoneNumber: !!phoneNumber,
@@ -100,7 +158,15 @@ export async function POST(request: Request) {
       hasLeadId: !!leadId,
       hasRequestUserId: !!requestUserId,
       hasTemplateVariables: !!templateVariables,
-      templateVariablesCount: templateVariables ? Object.keys(templateVariables).length : 0
+      templateVariablesCount: templateVariables ? Object.keys(templateVariables).length : 0,
+      hasRequestTemplateId: !!requestTemplateId,
+      hasRequestLanguage: !!requestLanguage,
+      hasRequestPhoneId: !!requestPhoneId,
+      hasRequestImageUrl: !!requestImageUrl,
+      needsHeaderComponent,
+      isFallback,
+      skipImageHeader,
+      hasExplicitComponents: !!explicitComponents
     });
 
     if (!phoneNumber) {
@@ -178,12 +244,25 @@ export async function POST(request: Request) {
 
     // Extract settings
     const {
-      whatsapp_phone_id: phoneId,
-      whatsapp_template_id: templateId,
-      whatsapp_language: language,
-      whatsapp_template_image_url: imageUrl,
+      whatsapp_phone_id: dbPhoneId,
+      whatsapp_template_id: dbTemplateId,
+      whatsapp_language: dbLanguage,
+      whatsapp_template_image_url: dbImageUrl,
       message_limit_24h: messageLimit
     } = userSettings;
+    
+    // Prioritize client-sent values over database settings
+    const phoneId = requestPhoneId || dbPhoneId;
+    const templateId = requestTemplateId || dbTemplateId;
+    const language = requestLanguage || dbLanguage;
+    const imageUrl = requestImageUrl || dbImageUrl;
+    
+    console.log('Using parameters:', {
+      phoneId,
+      templateId,
+      language,
+      hasImageUrl: !!imageUrl
+    });
     
     // Get WhatsApp token from environment variable
     const token = process.env.WHATSAPP_TOKEN;
@@ -257,19 +336,156 @@ export async function POST(request: Request) {
         name: templateId,
         language: {
           code: language
-        },
-        // Use our universal helper function to create a template structure
-        // that works with most WhatsApp templates
-        components: createTemplateComponents(templateId, leadName, imageUrl, templateVariables)
+        }
       }
     };
+    
+    // Get components for the template
+    try {
+      // If client provided explicit components, use those directly
+      if (explicitComponents) {
+        console.log('Using explicit components from client');
+        
+        // Build components array from explicit structure
+        const components = [];
+        
+        // Add header if provided
+        if (explicitComponents.header) {
+          components.push(explicitComponents.header);
+        }
+        
+        // Always add body
+        if (explicitComponents.body) {
+          components.push(explicitComponents.body);
+        } else {
+          // Fallback body if none provided
+          components.push({
+            type: 'body',
+            parameters: templateVariables ? 
+              formatTemplateParameters(templateVariables) : []
+          });
+        }
+        
+        // Add footer if provided
+        if (explicitComponents.footer) {
+          components.push(explicitComponents.footer);
+        }
+        
+        console.log('Using explicit components structure:', JSON.stringify(components, null, 2));
+        requestPayload.template.components = components;
+      }
+      // For skip image mode, just focus on the body parameters
+      else if (skipImageHeader) {
+        console.log('Explicitly skipping header image as requested');
+        
+        if (templateVariables && Object.keys(templateVariables).length > 0) {
+          // Use our safe parameter formatter 
+          const parameters = formatTemplateParameters(templateVariables);
+          
+          requestPayload.template.components = [
+            {
+              type: 'body',
+              parameters
+            }
+          ];
+          
+          console.log('Created body-only template with parameters');
+        } else {
+          // No parameters, just use an empty body component
+          requestPayload.template.components = [
+            {
+              type: 'body',
+              parameters: []
+            }
+          ];
+          console.log('Created body-only template with empty parameters');
+        }
+      }
+      // Conditional component creation logic based on if this is a fallback attempt
+      else if (isFallback) {
+        // For fallback mode, use a minimal component structure that should work
+        // with most templates - just a body with parameters
+        console.log('Using fallback template structure (no images)');
+        
+        if (templateVariables && Object.keys(templateVariables).length > 0) {
+          // Use our safe parameter formatter
+          const parameters = formatTemplateParameters(templateVariables);
+          
+          requestPayload.template.components = [
+            {
+              type: 'body',
+              parameters
+            }
+          ];
+        } else {
+          // No parameters, just use an empty body component
+          requestPayload.template.components = [
+            {
+              type: 'body',
+              parameters: []
+            }
+          ];
+        }
+      } else {
+        // Normal mode - use our component creation logic
+        const components = createTemplateComponents(templateId, leadName, imageUrl, templateVariables);
+        
+        // Only add components if there are any (prevents null/undefined values)
+        if (components && components.length > 0) {
+          // Properly structuring the template with components
+          // WhatsApp API expects specific component structure
+          requestPayload.template.components = components;
+        } else {
+          // Even if no custom components, ensure we have a valid structure
+          // Some templates require at minimum an empty body component
+          requestPayload.template.components = [
+            {
+              type: 'body',
+              parameters: []
+            }
+          ];
+        }
+        
+        // Special check for templates with images but missing header
+        if (imageUrl && needsHeaderComponent && !components.some((comp: any) => comp.type === 'header')) {
+          console.warn('Template has image URL but no header component. Adding header component.');
+          requestPayload.template.components.unshift({
+            type: 'header',
+            parameters: [
+              {
+                type: 'image',
+                image: {
+                  link: imageUrl
+                }
+              }
+            ]
+          });
+        }
+        
+        // Create and test for valid structure
+        if (!requestPayload.template.components.some((comp: any) => comp.type === 'body')) {
+          console.warn('Template missing required body component. Adding empty body component.');
+          requestPayload.template.components.push({
+            type: 'body',
+            parameters: []
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error('Error creating template components:', error);
+      return NextResponse.json(
+        { error: `Failed to create template components: ${error.message}` },
+        { status: 400 }
+      );
+    }
 
     console.log('WhatsApp API request payload (without sensitive data):', {
       to: normalizedPhone,
       templateName: templateId,
       languageCode: language,
       hasImageUrl: !!imageUrl,
-      hasLeadName: !!leadName
+      hasLeadName: !!leadName,
+      componentsCount: requestPayload.template.components?.length || 0
     });
 
     // Log detailed request payload for debugging
@@ -280,6 +496,7 @@ export async function POST(request: Request) {
     console.log('1. The template_id matches an approved template in your WhatsApp Business Account');
     console.log('2. You are providing the exact number of parameters the template requires');
     console.log('3. The parameter types (text, image, etc.) match what the template expects');
+    console.log('4. For templates with images, ensure the image URL is publicly accessible');
     
     // Make API call to WhatsApp
     console.log('Making WhatsApp API request...');
@@ -338,6 +555,87 @@ export async function POST(request: Request) {
       // Log the complete error for debugging
       if (error.response?.data?.error) {
         console.error('Complete WhatsApp API error:', JSON.stringify(error.response.data.error, null, 2));
+        
+        // Log specific details about missing parameters
+        if (error.response.data.error.code === 131008 || 
+            error.response.data.error.message?.includes('Required parameter')) {
+          console.error('WhatsApp ERROR: Missing required parameter. Check:');
+          console.error('1. Template exists in Business Manager and is approved');
+          console.error('2. Template components have required structure (header/body/footer)');
+          console.error('3. Required parameters match template definition exactly');
+          console.error('4. For image templates, the image URL is valid and accessible');
+          console.error('5. Full request payload:', JSON.stringify(requestPayload, null, 2));
+        }
+        
+        // Log specific details about parameter format mismatches
+        if (error.response.data.error.code === 132012 || 
+            error.response.data.error.message?.includes('Parameter format')) {
+          console.error('WhatsApp ERROR: Parameter format mismatch. Check:');
+          console.error('1. Each parameter must match the type defined in the template (text/image/currency etc.)');
+          console.error('2. The number of parameters must match exactly what the template expects');
+          console.error('3. Parameter order must match template definition');
+          console.error('4. For text parameters, ensure values are valid strings with no special formatting');
+          console.error('5. Parameters being sent:', JSON.stringify(requestPayload.template.components, null, 2));
+          
+          // Try a simplified approach with fewer parameters as a last resort
+          try {
+            // Create a simplified payload with only the first parameter (if any)
+            let simplifiedComponents = [];
+            
+            // Keep header if it exists
+            const headerComponent = requestPayload.template.components.find((c: any) => c.type === 'header');
+            if (headerComponent) {
+              simplifiedComponents.push(headerComponent);
+            }
+            
+            // Add a body with minimal parameters
+            const bodyComponent = requestPayload.template.components.find((c: any) => c.type === 'body');
+            if (bodyComponent && bodyComponent.parameters && bodyComponent.parameters.length > 0) {
+              // Just use the first parameter to test
+              const firstParam = bodyComponent.parameters[0];
+              simplifiedComponents.push({
+                type: 'body',
+                parameters: [firstParam]
+              });
+            } else {
+              // Add empty body if needed
+              simplifiedComponents.push({
+                type: 'body',
+                parameters: []
+              });
+            }
+            
+            console.log('Trying last resort approach with simplified components:', 
+                        JSON.stringify(simplifiedComponents, null, 2));
+                        
+            // Update the payload with simplified components
+            requestPayload.template.components = simplifiedComponents;
+            
+            // Make one more attempt with the simplified payload
+            const simplifiedResponse = await axios.post(url, requestPayload, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            console.log('Last resort approach succeeded:', {
+              status: simplifiedResponse.status,
+              hasMessages: !!simplifiedResponse.data?.messages,
+              messageCount: simplifiedResponse.data?.messages?.length || 0
+            });
+            
+            return NextResponse.json({
+              success: true,
+              messageId: simplifiedResponse.data.messages?.[0]?.id,
+              data: simplifiedResponse.data,
+              note: 'Used simplified parameters due to format mismatch'
+            });
+          } catch (simplifiedError: any) {
+            console.error('Last resort approach also failed:', simplifiedError.message);
+            // Continue with normal error handling
+          }
+        }
       }
       
       throw error; // Re-throw to be caught by the outer catch block
