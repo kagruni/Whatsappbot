@@ -18,6 +18,8 @@ export * from "./table";
 export * from "./tabs";
 export * from "./textarea";
 export * from "./tooltip";
+export * from "./accordion";
+export * from "./radio-group";
 
 // Typography
 export * from "./typography"; 

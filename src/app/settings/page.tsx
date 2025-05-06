@@ -26,13 +26,21 @@ import {
   P,
   Flex,
   Container,
-  Text
+  Text,
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+  RadioGroup,
+  RadioGroupItem
 } from '@/components/ui';
 import { 
   Save as SaveIcon, 
   RefreshCw as RefreshIcon,
   Check as CheckIcon,
-  AlertCircle as AlertIcon
+  AlertCircle as AlertIcon,
+  Phone as PhoneIcon,
+  CheckCircle as CheckCircleIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getUserSettings, saveUserSettings } from '@/lib/supabase/user-settings';
@@ -98,6 +106,19 @@ export default function SettingsPage() {
   const [openaiKey, setOpenaiKey] = useState('');
   const [aiModel, setAiModel] = useState('gpt-4.1-mini');
   const [systemPrompt, setSystemPrompt] = useState('');
+
+  // WhatsApp verification state
+  const [countryCode, setCountryCode] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [verificationMethod, setVerificationMethod] = useState('sms');
+  const [certificate, setCertificate] = useState('');
+  const [verificationPin, setVerificationPin] = useState('');
+  const [phoneNumberId, setPhoneNumberId] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [showVerificationCodeForm, setShowVerificationCodeForm] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [submittingCode, setSubmittingCode] = useState(false);
+  const [verifiedName, setVerifiedName] = useState('');
 
   useEffect(() => {
     // Load environment variables for fixed values
@@ -188,6 +209,155 @@ export default function SettingsPage() {
     }, 2000);
   };
 
+  const verifyWhatsAppNumber = async () => {
+    if (!user) {
+      toast.error('You must be signed in to register a phone number');
+      return;
+    }
+    
+    // Validation
+    if (!phoneNumberId) {
+      toast.error('WhatsApp Phone Number ID is required');
+      return;
+    }
+    
+    if (!certificate) {
+      toast.error('Certificate is required for registering a phone number');
+      return;
+    }
+    
+    try {
+      setVerifying(true);
+      
+      const response = await fetch('/api/whatsapp/verify-number', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          cert: certificate,
+          pin: verificationPin || undefined,
+          phone_number_id: phoneNumberId
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to register WhatsApp number');
+      }
+      
+      toast.success('WhatsApp phone number registered successfully!');
+      
+      // Update local state with the phone number ID
+      setWhatsappPhoneId(phoneNumberId);
+      
+      // Reload settings to get the updated data
+      await loadUserSettings();
+      
+    } catch (error) {
+      console.error('Error registering WhatsApp number:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to register WhatsApp number');
+    } finally {
+      setVerifying(false);
+    }
+  };
+  
+  const submitVerificationCode = async () => {
+    if (!verificationCode) {
+      toast.error('Please enter the verification code');
+      return;
+    }
+    
+    if (!user) {
+      toast.error('You must be signed in to verify a code');
+      return;
+    }
+
+    if (!phoneNumberId) {
+      toast.error('WhatsApp Phone Number ID is required');
+      return;
+    }
+    
+    try {
+      setSubmittingCode(true);
+      
+      const response = await fetch('/api/whatsapp/verify-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: verificationCode,
+          userId: user.id,
+          phone_number_id: phoneNumberId
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to verify code');
+      }
+      
+      toast.success('WhatsApp phone number verified successfully!');
+      
+      // Reset verification state
+      setShowVerificationCodeForm(false);
+      setVerificationCode('');
+      
+      // Update phone ID
+      setWhatsappPhoneId(phoneNumberId);
+      
+      // Reload settings to get the updated phone ID
+      await loadUserSettings();
+      
+    } catch (error) {
+      console.error('Error submitting verification code:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to verify code');
+    } finally {
+      setSubmittingCode(false);
+    }
+  };
+  
+  const resetVerification = () => {
+    setShowVerificationCodeForm(false);
+    setVerificationCode('');
+    setVerifiedName('');
+  };
+
+  const savePhoneNumberId = async () => {
+    if (!user) {
+      toast.error('You must be signed in to save settings');
+      return;
+    }
+    
+    if (!phoneNumberId) {
+      toast.error('WhatsApp Phone Number ID is required');
+      return;
+    }
+    
+    try {
+      setSaving(true);
+      await saveUserSettings({
+        whatsapp_phone_id: phoneNumberId
+      });
+      
+      // Update local state
+      setWhatsappPhoneId(phoneNumberId);
+      
+      toast.success('WhatsApp Phone Number ID saved successfully');
+      
+      // Reload settings to get the updated data
+      await loadUserSettings();
+    } catch (error) {
+      console.error('Error saving WhatsApp Phone Number ID:', error);
+      toast.error('Failed to save Phone Number ID');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <DashboardLayout>
@@ -265,6 +435,7 @@ export default function SettingsPage() {
                 variants={cardVariants}
                 initial="hidden"
                 animate="visible"
+                className="space-y-6"
               >
                 <Card className="border border-gray-200 shadow-sm">
                   <CardHeader>
@@ -480,6 +651,140 @@ export default function SettingsPage() {
                               >
                                 <RefreshIcon className="h-4 w-4 mr-2" />
                                 <span>Test Connection</span>
+                              </Button>
+                            </motion.div>
+                          </Flex>
+                        </motion.div>
+                      </Flex>
+                    </motion.div>
+                  </CardContent>
+                </Card>
+
+                {/* WhatsApp Phone Number Verification Card */}
+                <Card className="border border-gray-200 shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="text-gray-800">Register WhatsApp Phone Number</CardTitle>
+                    <CardDescription className="text-gray-600">
+                      Register your verified WhatsApp phone number with a certificate
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <motion.div
+                      variants={staggerVariants}
+                      initial="hidden"
+                      animate="visible"
+                    >
+                      <Flex direction="column" gap="md" className="space-y-4 mt-2">
+                        <motion.div variants={itemVariants}>
+                          <div>
+                            <Label className="text-gray-700 mb-1.5 block">WhatsApp Phone Number ID</Label>
+                            <Input 
+                              placeholder="Enter your WhatsApp Phone Number ID from Meta Developer Portal" 
+                              value={phoneNumberId}
+                              onChange={(e) => setPhoneNumberId(e.target.value)}
+                              className="border-gray-200 text-gray-800"
+                            />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              Your unique WhatsApp Phone Number ID from the Meta Developer Portal (required)
+                            </Text>
+                          </div>
+                        </motion.div>
+                        
+                        <motion.div variants={itemVariants}>
+                          <div>
+                            <Label className="text-gray-700 mb-1.5 block">Certificate</Label>
+                            <Textarea 
+                              placeholder="Paste your base64-encoded certificate from Meta Business Manager" 
+                              value={certificate}
+                              onChange={(e) => setCertificate(e.target.value)}
+                              rows={5}
+                              className="min-h-24 border-gray-200 text-gray-800 font-mono text-sm"
+                            />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              Base64-encoded certificate string from your WhatsApp Manager (required)
+                            </Text>
+                          </div>
+                        </motion.div>
+                        
+                        <motion.div variants={itemVariants}>
+                          <div>
+                            <Label className="text-gray-700 mb-1.5 block">Two-Step Verification PIN (Optional)</Label>
+                            <Input 
+                              placeholder="6-digit PIN" 
+                              value={verificationPin}
+                              onChange={(e) => setVerificationPin(e.target.value)}
+                              type="password"
+                              maxLength={6}
+                              className="border-gray-200 text-gray-800"
+                            />
+                            <Text className="text-xs text-gray-600 mt-1.5">
+                              Only required if two-step verification is enabled
+                            </Text>
+                          </div>
+                        </motion.div>
+                        
+                        <motion.div variants={cardVariants} className="mt-6 mb-4">
+                          <Accordion type="single" collapsible className="w-full">
+                            <AccordionItem value="instructions">
+                              <AccordionTrigger className="text-blue-700 hover:text-blue-800 font-medium">
+                                How to get your Phone Number ID and Certificate
+                              </AccordionTrigger>
+                              <AccordionContent className="text-sm text-gray-700 space-y-2 p-4 bg-gray-50 rounded-md">
+                                <ol className="list-decimal pl-5 space-y-2">
+                                  <li>Go to <strong>Meta for Developers</strong> and open your WhatsApp application</li>
+                                  <li>Navigate to the <strong>API Setup</strong> page</li>
+                                  <li>Find your phone number in the list</li>
+                                  <li>The Phone Number ID is displayed next to your phone number</li>
+                                  <li>You can also find it in the <strong>WhatsApp Manager</strong> under <strong>Account tools</strong> {`>`} <strong>Phone numbers</strong></li>
+                                  <li>For the certificate, click on the phone number in WhatsApp Manager</li>
+                                  <li>In the pop-up dialog, click <strong>Get Certificate</strong></li>
+                                  <li>Copy the certificate string and paste it here</li>
+                                </ol>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        </motion.div>
+                        
+                        <motion.div variants={itemVariants}>
+                          <Flex gap="sm" className="pt-4">
+                            <motion.div
+                              variants={buttonVariants}
+                              initial="initial"
+                              whileHover="hover"
+                              whileTap="tap"
+                            >
+                              <Button 
+                                variant="default"
+                                className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
+                                onClick={verifyWhatsAppNumber}
+                                disabled={verifying}
+                              >
+                                {verifying ? (
+                                  <RefreshIcon className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <PhoneIcon className="h-4 w-4 mr-2" />
+                                )}
+                                <span>Register Phone Number</span>
+                              </Button>
+                            </motion.div>
+                            <motion.div
+                              variants={buttonVariants}
+                              initial="initial"
+                              whileHover="hover"
+                              whileTap="tap"
+                            >
+                              <Button 
+                                variant="secondary"
+                                className="bg-white text-gray-700 border border-gray-200 shadow-sm hover:bg-gray-50"
+                                onClick={savePhoneNumberId}
+                                disabled={saving}
+                              >
+                                {saving ? (
+                                  <RefreshIcon className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                  <CheckIcon className="h-4 w-4 mr-2" />
+                                )}
+                                <span>Skip Registration</span>
                               </Button>
                             </motion.div>
                           </Flex>
