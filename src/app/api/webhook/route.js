@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyWhatsAppWebhook, processWhatsAppWebhook } from '../lib/whatsapp';
 import userSettings from '../userSettings';
+import { supabase } from '../lib/supabase';
 
 // Initialize user settings
 let initialized = false;
@@ -26,6 +27,36 @@ async function ensureInitialized() {
     } catch (error) {
       console.error('Error initializing user settings:', error);
     }
+  }
+}
+
+// Check if a phone number ID is registered in our system
+async function isPhoneNumberIdRegistered(phoneNumberId) {
+  try {
+    console.log(`[FILTER] Checking if phone number ID exists in database: ${phoneNumberId}`);
+    
+    // Query Supabase to check if this phone number ID exists in user_settings
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('id, user_id')
+      .eq('whatsapp_phone_id', phoneNumberId)
+      .limit(1);
+    
+    if (error) {
+      console.error('[FILTER] Error checking phone number ID:', error);
+      return false;
+    }
+    
+    if (!data || data.length === 0) {
+      console.log(`[FILTER] No user found with WhatsApp phone number ID: ${phoneNumberId}`);
+      return false;
+    }
+    
+    console.log(`[FILTER] Found user ${data[0].user_id} with WhatsApp phone number ID: ${phoneNumberId}`);
+    return true;
+  } catch (error) {
+    console.error('[FILTER] Error checking if phone number ID is registered:', error);
+    return false;
   }
 }
 
@@ -112,6 +143,37 @@ export async function POST(request) {
         return NextResponse.json({ error: 'No entries in webhook payload' }, { status: 400 });
       }
       
+      // Early filter by phone number ID
+      console.log('===== WEBHOOK PHONE NUMBER ID FILTERING =====');
+      let phoneNumberId = null;
+      
+      if (body.entry[0]?.changes && 
+          body.entry[0].changes[0]?.value?.metadata) {
+        
+        phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
+        
+        if (phoneNumberId) {
+          console.log(`[FILTER] Received webhook for phone number ID: ${phoneNumberId}`);
+          const isRegistered = await isPhoneNumberIdRegistered(phoneNumberId);
+          
+          if (!isRegistered) {
+            console.log(`[FILTER] REJECTED: Phone number ID ${phoneNumberId} not registered in our system`);
+            // Still return 200 OK to prevent Meta from retrying
+            return NextResponse.json(
+              { success: true, message: 'Phone number ID not registered' }, 
+              { status: 200, headers }
+            );
+          }
+          
+          console.log(`[FILTER] ACCEPTED: Phone number ID ${phoneNumberId} is registered, continuing with processing`);
+        } else {
+          console.log('[FILTER] WARNING: No phone number ID found in webhook metadata, processing anyway');
+        }
+      } else {
+        console.log('[FILTER] WARNING: Could not extract metadata from webhook, processing anyway');
+      }
+      console.log('===== END WEBHOOK FILTERING =====');
+      
       try {
         // Look for messages in the webhook payload
         let hasMessages = false;
@@ -136,18 +198,18 @@ export async function POST(request) {
         
         if (result) {
           console.log('Successfully processed webhook');
-          return NextResponse.json({ success: true, processed: true }, { status: 200, headers });
+          return NextResponse.json({ success: true, processed: true, phoneNumberId }, { status: 200, headers });
         } else {
           if (hasMessages) {
             console.warn('Webhook contained messages but no processing occurred');
             return NextResponse.json(
-              { success: false, error: 'Failed to process messages' }, 
+              { success: false, error: 'Failed to process messages', phoneNumberId }, 
               { status: 500, headers }
             );
           } else {
             // This might be a status update or another type of webhook
             console.log('Webhook processed (no messages to handle)');
-            return NextResponse.json({ success: true, processed: false }, { status: 200, headers });
+            return NextResponse.json({ success: true, processed: false, phoneNumberId }, { status: 200, headers });
           }
         }
       } catch (processingError) {
@@ -155,6 +217,7 @@ export async function POST(request) {
         return NextResponse.json({ 
           error: 'Error processing webhook', 
           message: processingError.message,
+          phoneNumberId,
           stack: process.env.NODE_ENV === 'development' ? processingError.stack : undefined
         }, { status: 500, headers });
       }
