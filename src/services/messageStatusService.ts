@@ -34,39 +34,76 @@ interface Message {
  */
 export async function fetchMessageStatusData(userId: string): Promise<LeadStatusData> {
   try {
-    // 1. Get all outbound template messages
-    const { data: messages, error: messagesError } = await supabase
-      .from('lead_conversations')
-      .select('id, lead_id, status, direction, message_type, created_at')
-      .eq('user_id', userId)
-      .eq('direction', 'outbound')
-      .eq('message_type', 'template');
+    // Fetch all template messages using pagination
+    let allMessages: Message[] = [];
+    let messagesHasMore = true;
+    let messagesPage = 0;
+    const pageSize = 1000;
+    
+    while (messagesHasMore) {
+      console.log(`Fetching messages page ${messagesPage + 1}`);
+      const { data: pageMessages, error: messagesError } = await supabase
+        .from('lead_conversations')
+        .select('id, lead_id, status, direction, message_type, created_at')
+        .eq('user_id', userId)
+        .eq('direction', 'outbound')
+        .eq('message_type', 'template')
+        .range(messagesPage * pageSize, (messagesPage + 1) * pageSize - 1);
+        
+      if (messagesError) {
+        console.error('Error fetching message status data:', messagesError);
+        return {};
+      }
       
-    if (messagesError) {
-      console.error('Error fetching message status data:', messagesError);
-      return {};
+      if (pageMessages && pageMessages.length > 0) {
+        allMessages = [...allMessages, ...pageMessages];
+        messagesPage++;
+        messagesHasMore = pageMessages.length === pageSize;
+      } else {
+        messagesHasMore = false;
+      }
     }
     
-    // 2. Get all leads to map them to their sources
-    const { data: leads, error: leadsError } = await supabase
-      .from('leads')
-      .select('id, source, status')
-      .eq('user_id', userId);
+    console.log(`Total messages fetched: ${allMessages.length}`);
+    
+    // Fetch all leads using pagination
+    let allLeads: Lead[] = [];
+    let leadsHasMore = true;
+    let leadsPage = 0;
+    
+    while (leadsHasMore) {
+      console.log(`Fetching leads page ${leadsPage + 1}`);
+      const { data: pageLeads, error: leadsError } = await supabase
+        .from('leads')
+        .select('id, source, status')
+        .eq('user_id', userId)
+        .range(leadsPage * pageSize, (leadsPage + 1) * pageSize - 1);
+        
+      if (leadsError) {
+        console.error('Error fetching leads data:', leadsError);
+        return {};
+      }
       
-    if (leadsError) {
-      console.error('Error fetching leads data:', leadsError);
-      return {};
+      if (pageLeads && pageLeads.length > 0) {
+        allLeads = [...allLeads, ...pageLeads];
+        leadsPage++;
+        leadsHasMore = pageLeads.length === pageSize;
+      } else {
+        leadsHasMore = false;
+      }
     }
+    
+    console.log(`Total leads fetched: ${allLeads.length}`);
     
     // Create a map of lead IDs to their sources
     const leadSourceMap = new Map<string, string>();
-    leads?.forEach((lead: Lead) => {
+    allLeads.forEach((lead: Lead) => {
       leadSourceMap.set(lead.id, lead.source);
     });
     
     // Create a map of lead IDs to their message status
     const leadMessageStatusMap = new Map<string, string>();
-    messages?.forEach((message: Message) => {
+    allMessages.forEach((message: Message) => {
       // Track read status by lead ID - only overwrite if status is 'read' or no status exists yet
       const currentStatus = leadMessageStatusMap.get(message.lead_id);
       if (!currentStatus || message.status === 'read') {
@@ -78,7 +115,7 @@ export async function fetchMessageStatusData(userId: string): Promise<LeadStatus
     const result: LeadStatusData = {};
     
     // Initialize with all sources from leads
-    leads?.forEach((lead: Lead) => {
+    allLeads.forEach((lead: Lead) => {
       const source = lead.source;
       if (!result[source]) {
         result[source] = {

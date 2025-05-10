@@ -182,20 +182,44 @@ export default function SourceDistribution() {
   const fetchLeadSourceData = async () => {
     setIsLoading(true);
     try {
-      // Fetch leads from Supabase to get basic counts
-      const { data, error } = await supabase
-        .from('leads')
-        .select('*')
-        .eq('user_id', user?.id);
-
-      if (error) {
-        throw new Error(error.message);
+      // Use pagination to fetch all leads to overcome any backend limits
+      let allLeads: any[] = [];
+      let hasMore = true;
+      let page = 0;
+      const pageSize = 1000; // Fetch 1000 at a time
+      
+      // Fetch all leads using pagination
+      while (hasMore) {
+        console.log(`Fetching leads page ${page + 1}, offset: ${page * pageSize}`);
+        const { data, error } = await supabase
+          .from('leads')
+          .select('*')
+          .eq('user_id', user?.id)
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        
+        if (error) {
+          console.error('Error fetching leads page:', error);
+          throw error;
+        }
+        
+        if (data && data.length > 0) {
+          allLeads = [...allLeads, ...data];
+          page++;
+          console.log(`Fetched page ${page} with ${data.length} leads, total so far: ${allLeads.length}`);
+          
+          // Check if this page had fewer results than the page size
+          hasMore = data.length === pageSize;
+        } else {
+          hasMore = false;
+        }
       }
+      
+      console.log(`Total leads fetched: ${allLeads.length}`);
 
-      if (data) {
+      if (allLeads.length > 0) {
         // Group leads by source
         const leadsBySource: Record<string, Lead[]> = {};
-        data.forEach((lead: Lead) => {
+        allLeads.forEach((lead: Lead) => {
           if (lead.source) {
             if (!leadsBySource[lead.source]) {
               leadsBySource[lead.source] = [];
@@ -251,7 +275,7 @@ export default function SourceDistribution() {
           .sort((a, b) => b.count - a.count); // Sort by count descending
 
         setSourceData(sourceDataArray);
-        setTotalLeads(data.length);
+        setTotalLeads(allLeads.length);
       }
     } catch (error: any) {
       console.error('Error fetching lead source data:', error);
@@ -411,28 +435,57 @@ export default function SourceDistribution() {
         throw new Error(`Daily message limit of ${messageLimit} reached. Try again tomorrow.`);
       }
       
-      // Find all leads for this source
-      const { data: leads, error } = await supabase
-        .from('leads')
-        .select('*')
-        .eq('user_id', user?.id)
-        .eq('source', source)
-        .not('status', 'in', ['Contacted', 'Failed']); // Exclude both contacted and failed leads
+      // Find all leads for this source using pagination
+      let allLeads: any[] = [];
+      let hasMore = true;
+      let page = 0;
+      const pageSize = 1000; // Fetch 1000 at a time
       
-      if (error) {
-        throw new Error(error.message);
+      try {
+        // Fetch all leads for this source using pagination
+        while (hasMore) {
+          console.log(`Fetching source ${source} leads page ${page + 1}, offset: ${page * pageSize}`);
+          const { data, error } = await supabase
+            .from('leads')
+            .select('*')
+            .eq('user_id', user?.id)
+            .eq('source', source)
+            .not('status', 'eq', 'Contacted') // Exclude contacted leads
+            .not('status', 'eq', 'Failed')    // Also exclude failed leads
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          
+          if (error) {
+            console.error('Error fetching source leads page:', error);
+            throw error;
+          }
+          
+          if (data && data.length > 0) {
+            allLeads = [...allLeads, ...data];
+            page++;
+            console.log(`Fetched page ${page} with ${data.length} leads, total so far: ${allLeads.length}`);
+            
+            // Check if this page had fewer results than the page size
+            hasMore = data.length === pageSize;
+          } else {
+            hasMore = false;
+          }
+        }
+        
+        console.log(`Total leads fetched for source ${source}: ${allLeads.length}`);
+      } catch (error) {
+        throw new Error(`Error fetching leads: ${error}`);
       }
       
-      if (!leads || leads.length === 0) {
+      if (allLeads.length === 0) {
         throw new Error('No leads found for this source or all leads have been contacted');
       }
       
       // Limit leads to process based on remaining message quota
-      const leadsToProcess = leads.slice(0, remainingMessages);
+      const leadsToProcess = allLeads.slice(0, remainingMessages);
       
       // Notify if we're not processing all leads due to limits
-      if (leadsToProcess.length < leads.length) {
-        toast.info(`Processing ${leadsToProcess.length} out of ${leads.length} leads due to daily message limit.`);
+      if (leadsToProcess.length < allLeads.length) {
+        toast.info(`Processing ${leadsToProcess.length} out of ${allLeads.length} leads due to daily message limit.`);
       }
       
       // Create a throttled process to send messages (to prevent hitting API limits)
@@ -529,7 +582,7 @@ export default function SourceDistribution() {
       }
       
       if (succeeded + failed === leadsToProcess.length) {
-        const remainingLeads = leads.length - leadsToProcess.length;
+        const remainingLeads = allLeads.length - leadsToProcess.length;
         if (remainingLeads > 0) {
           toast.success(`Completed: ${succeeded} messages sent, ${failed} failed. ${remainingLeads} leads remaining due to daily limit.`);
         } else {
