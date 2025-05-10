@@ -47,20 +47,45 @@ const colors = [
 // WhatsApp brand colors
 const WHATSAPP_GREEN = '#25D366';
 
-// Function to normalize German phone numbers
-function normalizeGermanPhoneNumber(phone: string): string {
-  // Remove all non-digit characters
-  let normalized = phone.replace(/\D/g, '');
+// Function to normalize phone numbers to a consistent international format
+function normalizePhoneNumber(phone: string): string {
+  if (!phone) return '';
   
-  // Remove leading zero(s) which are used in domestic German format
-  normalized = normalized.replace(/^0+/, '');
+  // Remove all non-numeric characters
+  let cleaned = phone.replace(/\D/g, '');
   
-  // If number doesn't already have the German country code, add it
-  if (!normalized.startsWith('49')) {
-    normalized = `49${normalized}`;
+  // Handle international format
+  if (cleaned.startsWith('00')) {
+    // Convert 00 prefix to +
+    cleaned = '+' + cleaned.substring(2);
+  } else if (!cleaned.startsWith('+') && cleaned.length > 10) {
+    // Add + for international numbers without + that are longer than 10 digits
+    if (cleaned.startsWith('1') && cleaned.length === 11) {
+      // US/Canada number
+      cleaned = '+' + cleaned;
+    } else if (cleaned.startsWith('49') || cleaned.startsWith('44') || cleaned.startsWith('33')) {
+      // Common European country codes (Germany, UK, France)
+      cleaned = '+' + cleaned;
+    } else if (cleaned.startsWith('0') && cleaned.length > 10) {
+      // Handle numbers that start with 0 (common in European countries)
+      // Remove the leading 0 and add country code
+      cleaned = '+' + cleaned.substring(1);
+    } else {
+      // Other international number, assume it has a country code
+      cleaned = '+' + cleaned;
+    }
+  } else if (cleaned.length === 10) {
+    // Assume US/Canada format if 10 digits
+    cleaned = '+1' + cleaned;
   }
   
-  return normalized;
+  // Format number for more readability if it has a + prefix
+  if (cleaned.startsWith('+')) {
+    return cleaned;
+  }
+  
+  // Return the cleaned number if we couldn't determine a standard format
+  return cleaned;
 }
 
 export default function SourceDistribution() {
@@ -121,11 +146,13 @@ export default function SourceDistribution() {
       today.setHours(0, 0, 0, 0);
       
       // Query conversations created in the last 24 hours with message_type = 'template'
+      // Exclude messages with status 'failed' from count
       const { data, error } = await supabase
         .from('lead_conversations')
         .select('id')
         .eq('user_id', user.id)
         .eq('message_type', 'template') // Only count template messages
+        .neq('status', 'failed') // Exclude failed messages from count
         .gte('created_at', today.toISOString());
 
       if (error) {
@@ -390,7 +417,7 @@ export default function SourceDistribution() {
         .select('*')
         .eq('user_id', user?.id)
         .eq('source', source)
-        .not('status', 'eq', 'Contacted'); // Only get leads that haven't been contacted yet
+        .not('status', 'in', ['Contacted', 'Failed']); // Exclude both contacted and failed leads
       
       if (error) {
         throw new Error(error.message);
@@ -417,8 +444,12 @@ export default function SourceDistribution() {
         try {
           console.log('Processing lead:', lead.name, lead.phone);
           
+          // Normalize the phone number before sending
+          const normalizedPhone = normalizePhoneNumber(lead.phone);
+          console.log(`Normalized phone: ${lead.phone} → ${normalizedPhone}`);
+          
           // Send the WhatsApp template message with lead details
-          const response = await sendWhatsAppTemplateMessage(lead.phone, templateId, templateLanguage, lead.id, lead.name);
+          const response = await sendWhatsAppTemplateMessage(normalizedPhone, templateId, templateLanguage, lead.id, lead.name);
           
           // Check if message was sent successfully
           const success = response && response.success;
@@ -473,8 +504,7 @@ export default function SourceDistribution() {
               console.error('Schema issue? Check if lead_conversations table exists and has expected columns');
             }
             
-            // Increment used messages count
-            setMessagesUsedToday(prev => prev + 1);
+            // Do not increment message count for failed messages
             failed++;
           }
           
@@ -892,32 +922,32 @@ export default function SourceDistribution() {
                           !templateLanguage || 
                           !whatsappPhoneId ||
                           messagesUsedToday >= messageLimit ||
-                          source.contacted === source.count // Disable when all leads are contacted
+                          source.contacted + source.failed >= source.count // Disable when all leads are contacted or failed
                         }
                         size="sm"
                         className="mt-2 text-gray-800 font-medium"
                         style={{
-                          backgroundColor: source.contacted === 0 ? WHATSAPP_GREEN : undefined,
-                          border: source.contacted === 0 ? 'none' : undefined
+                          backgroundColor: source.contacted + source.failed === 0 ? WHATSAPP_GREEN : undefined,
+                          border: source.contacted + source.failed === 0 ? 'none' : undefined
                         }}
-                        variant={source.contacted === 0 ? "default" : "outline"}
+                        variant={source.contacted + source.failed === 0 ? "default" : "outline"}
                       >
                         {source.inProgress ? (
                           <>
                             <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-gray-800 border-t-transparent"></div>
-                            <span className={source.contacted === 0 ? "text-gray-800" : "text-gray-800"}>Sending...</span>
+                            <span className={source.contacted + source.failed === 0 ? "text-gray-800" : "text-gray-800"}>Sending...</span>
                           </>
                         ) : messagesUsedToday >= messageLimit ? (
                           <>
                             <AlertTriangleIcon className="mr-2 h-4 w-4" />
                             <span className="text-gray-800">Daily Limit Reached</span>
                           </>
-                        ) : source.contacted === 0 ? (
+                        ) : source.contacted + source.failed === 0 ? (
                           <>
                             <MessageSquareIcon className="mr-2 h-4 w-4" />
                             <span className="text-gray-800">Start Conversations</span>
                           </>
-                        ) : source.contacted < source.count ? (
+                        ) : source.contacted + source.failed < source.count ? (
                           <>
                             <MessageSquareIcon className="mr-2 h-4 w-4" />
                             <span className="text-gray-800">Continue Outreach</span>
@@ -925,7 +955,7 @@ export default function SourceDistribution() {
                         ) : (
                           <>
                             <CheckIcon className="mr-2 h-4 w-4" />
-                            <span className="text-gray-800">All Contacted</span>
+                            <span className="text-gray-800">All Processed</span>
                           </>
                         )}
                       </Button>
@@ -952,10 +982,10 @@ export default function SourceDistribution() {
                       )}
                       
                       {/* Add notification for partial contacts due to daily limits */}
-                      {source.contacted > 0 && source.contacted < source.count && messagesUsedToday >= messageLimit && (
+                      {source.contacted + source.failed > 0 && source.contacted + source.failed < source.count && messagesUsedToday >= messageLimit && (
                         <p className="text-xs text-amber-600 mt-1 flex items-center">
                           <AlertTriangleIcon className="h-3 w-3 mr-1" />
-                          Partially contacted. Continue tomorrow when limit resets.
+                          Partially processed. Continue tomorrow when limit resets.
                         </p>
                       )}
                       

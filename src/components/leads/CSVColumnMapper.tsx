@@ -45,6 +45,9 @@ const optionalFields = [
 
 const allFields = [...defaultRequiredFields, ...optionalFields];
 
+// Use a constant for the none value to avoid empty strings
+const NONE_VALUE = "__none__";
+
 const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
   isOpen,
   setIsOpen,
@@ -54,15 +57,21 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
 }) => {
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  
+  // Filter out any empty headers and sanitize them
+  const sanitizedHeaders = csvHeaders.filter(header => header.trim() !== '').map(header => {
+    // Replace any problematic header with a sanitized version
+    return header.trim() || `Header_${Math.random().toString(36).substring(2, 9)}`;
+  });
 
   // Initialize with likely matches based on header names
   useEffect(() => {
-    if (csvHeaders.length > 0 && Object.keys(columnMapping).length === 0) {
+    if (sanitizedHeaders.length > 0 && Object.keys(columnMapping).length === 0) {
       const initialMapping: Record<string, string> = {};
       
       allFields.forEach(field => {
         // Try to find exact match first
-        const exactMatch = csvHeaders.find(
+        const exactMatch = sanitizedHeaders.find(
           header => header.toLowerCase() === field.name.toLowerCase()
         );
         
@@ -72,7 +81,7 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
         }
         
         // Try to find partial match
-        const partialMatch = csvHeaders.find(
+        const partialMatch = sanitizedHeaders.find(
           header => header.toLowerCase().includes(field.name.toLowerCase())
         );
         
@@ -83,11 +92,11 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
       
       setColumnMapping(initialMapping);
     }
-  }, [csvHeaders]);
+  }, [sanitizedHeaders]);
 
   const handleColumnChange = (fieldName: string, csvColumn: string) => {
     // If none is selected, remove the mapping for this field
-    if (csvColumn === 'none') {
+    if (csvColumn === NONE_VALUE) {
       setColumnMapping(prev => {
         const newMapping = { ...prev };
         delete newMapping[fieldName];
@@ -189,7 +198,7 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
                   </label>
                   <div>
                     <Select
-                      value={columnMapping[field.name] || 'none'}
+                      value={columnMapping[field.name] || NONE_VALUE}
                       onValueChange={(value) => handleColumnChange(field.name, value)}
                     >
                       <SelectTrigger
@@ -199,8 +208,8 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
                         <SelectValue placeholder="Select a column" />
                       </SelectTrigger>
                       <SelectContent className="max-h-[200px] bg-white">
-                        <SelectItem value="none" className="text-black">-- None --</SelectItem>
-                        {csvHeaders.map(header => (
+                        <SelectItem value={NONE_VALUE} className="text-black">-- None --</SelectItem>
+                        {sanitizedHeaders.map(header => (
                           <SelectItem key={header} value={header} className="text-black">
                             {header}
                           </SelectItem>
@@ -228,7 +237,7 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
                   </label>
                   <div>
                     <Select
-                      value={columnMapping[field.name] || 'none'}
+                      value={columnMapping[field.name] || NONE_VALUE}
                       onValueChange={(value) => handleColumnChange(field.name, value)}
                     >
                       <SelectTrigger
@@ -238,8 +247,8 @@ const CSVColumnMapper: React.FC<CSVColumnMapperProps> = ({
                         <SelectValue placeholder="Select a column" />
                       </SelectTrigger>
                       <SelectContent className="max-h-[200px] bg-white">
-                        <SelectItem value="none" className="text-black">-- None --</SelectItem>
-                        {csvHeaders.map(header => (
+                        <SelectItem value={NONE_VALUE} className="text-black">-- None --</SelectItem>
+                        {sanitizedHeaders.map(header => (
                           <SelectItem key={header} value={header} className="text-black">
                             {header}
                           </SelectItem>

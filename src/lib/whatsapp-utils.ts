@@ -104,11 +104,12 @@ export async function checkDailyMessageLimit(userId: string, limit: number): Pro
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Count messages sent today
+    // Count messages sent today, excluding failed messages
     const { count, error } = await supabase
       .from('lead_conversations')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
+      .neq('status', 'failed') // Exclude messages with failed status
       .gte('created_at', today.toISOString());
     
     if (error) {

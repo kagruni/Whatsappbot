@@ -25,6 +25,49 @@ const createServerClient = async (req: NextRequest) => {
   });
 };
 
+// Helper function to split array into chunks
+const chunkArray = <T>(array: T[], chunkSize: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += chunkSize) {
+    chunks.push(array.slice(i, i + chunkSize));
+  }
+  return chunks;
+};
+
+// Normalize phone numbers to a consistent format
+const normalizePhoneNumber = (phone: string): string => {
+  if (!phone) return '';
+  
+  // Remove all non-numeric characters
+  let cleaned = phone.replace(/\D/g, '');
+  
+  // Handle international format
+  if (cleaned.startsWith('00')) {
+    // Convert 00 prefix to +
+    cleaned = '+' + cleaned.substring(2);
+  } else if (!cleaned.startsWith('+') && cleaned.length > 10) {
+    // Add + for international numbers without + that are longer than 10 digits
+    if (cleaned.startsWith('1') && cleaned.length === 11) {
+      // US/Canada number
+      cleaned = '+' + cleaned;
+    } else {
+      // Other international number, assume it has a country code
+      cleaned = '+' + cleaned;
+    }
+  } else if (cleaned.length === 10) {
+    // Assume US/Canada format if 10 digits
+    cleaned = '+1' + cleaned;
+  }
+  
+  // Format number for more readability if it has a + prefix
+  if (cleaned.startsWith('+')) {
+    return cleaned;
+  }
+  
+  // Return the cleaned number if we couldn't determine a standard format
+  return cleaned;
+};
+
 export async function GET(req: NextRequest) {
   try {
     const supabase = await createServerClient(req);
@@ -155,6 +198,8 @@ export async function POST(req: NextRequest) {
     readableStream.push(null);
     
     const results: any[] = [];
+    let skippedRecords = 0;
+    let duplicatePhones = new Set<string>();
     
     await new Promise<void>((resolve, reject) => {
       readableStream
@@ -169,21 +214,61 @@ export async function POST(req: NextRequest) {
           let hasRequiredFields = true;
           
           // Check if we have mapping for required field (phone)
+          let rawPhone = '';
           if (columnMapping.phone) {
             // Get the value using the mapped column name
-            const phone = record[columnMapping.phone];
+            rawPhone = record[columnMapping.phone];
             
-            if (!phone) {
+            if (!rawPhone) {
               hasRequiredFields = false;
             } else {
-              mappedRecord.phone = phone;
+              // Normalize the phone number
+              const normalizedPhone = normalizePhoneNumber(rawPhone);
+              
+              // Skip record if phone number couldn't be normalized
+              if (!normalizedPhone) {
+                hasRequiredFields = false;
+                skippedRecords++;
+                console.log(`Skipping record with invalid phone: ${rawPhone}`);
+              } else {
+                mappedRecord.phone = normalizedPhone;
+                
+                // Check for duplicate phone in current import
+                if (duplicatePhones.has(normalizedPhone)) {
+                  console.log(`Skipping duplicate phone number: ${normalizedPhone}`);
+                  skippedRecords++;
+                  hasRequiredFields = false;
+                } else {
+                  duplicatePhones.add(normalizedPhone);
+                }
+              }
             }
           } else {
             // Fall back to direct column name if no mapping
-            if (!record.phone) {
+            rawPhone = record.phone;
+            if (!rawPhone) {
               hasRequiredFields = false;
             } else {
-              mappedRecord.phone = record.phone;
+              // Normalize the phone number
+              const normalizedPhone = normalizePhoneNumber(rawPhone);
+              
+              // Skip record if phone number couldn't be normalized
+              if (!normalizedPhone) {
+                hasRequiredFields = false;
+                skippedRecords++;
+                console.log(`Skipping record with invalid phone: ${rawPhone}`);
+              } else {
+                mappedRecord.phone = normalizedPhone;
+                
+                // Check for duplicate phone in current import
+                if (duplicatePhones.has(normalizedPhone)) {
+                  console.log(`Skipping duplicate phone number: ${normalizedPhone}`);
+                  skippedRecords++;
+                  hasRequiredFields = false;
+                } else {
+                  duplicatePhones.add(normalizedPhone);
+                }
+              }
             }
           }
           
@@ -222,9 +307,9 @@ export async function POST(req: NextRequest) {
             mappedRecord.created_at = new Date().toISOString();
             
             results.push(mappedRecord);
-            console.log('Mapped record:', mappedRecord);
-          } else {
+          } else if (!hasRequiredFields && !rawPhone) {
             console.log('Invalid record - missing required phone field:', record);
+            skippedRecords++;
           }
         })
         .on('end', () => resolve())
@@ -237,22 +322,51 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
     
-    console.log(`Inserting ${results.length} leads into database`);
-    // Insert the parsed data into the database
-    const { data, error } = await supabase
-      .from('leads')
-      .insert(results)
-      .select();
+    console.log(`Processing ${results.length} leads to insert into database (${skippedRecords} records skipped)`);
+    
+    // Split results into chunks of 1000 to avoid Supabase limitations
+    const CHUNK_SIZE = 1000;
+    const chunkedResults = chunkArray(results, CHUNK_SIZE);
+    let insertedCount = 0;
+    let insertErrors = [];
+    
+    // Process each chunk
+    for (let i = 0; i < chunkedResults.length; i++) {
+      const chunk = chunkedResults[i];
+      console.log(`Inserting chunk ${i+1}/${chunkedResults.length} (${chunk.length} records)`);
       
-    if (error) {
-      console.error('Database insert error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      try {
+        const { data, error } = await supabase
+          .from('leads')
+          .insert(chunk);
+        
+        if (error) {
+          console.error(`Error inserting chunk ${i+1}:`, error);
+          insertErrors.push({ chunk: i+1, error: error.message });
+        } else {
+          insertedCount += chunk.length;
+          console.log(`Successfully inserted chunk ${i+1} (${chunk.length} records)`);
+        }
+      } catch (err: any) {
+        console.error(`Exception inserting chunk ${i+1}:`, err);
+        insertErrors.push({ chunk: i+1, error: err.message });
+      }
     }
     
-    console.log('CSV import successful');
+    if (insertedCount === 0 && insertErrors.length > 0) {
+      // All chunks failed
+      return NextResponse.json({ 
+        error: `Failed to insert any leads: ${insertErrors[0].error}` 
+      }, { status: 500 });
+    }
+    
+    console.log(`CSV import completed: ${insertedCount}/${results.length} leads inserted successfully (${skippedRecords} records skipped)`);
+    
     return NextResponse.json({ 
-      message: `Successfully imported ${results.length} leads`,
-      data 
+      message: `Successfully imported ${insertedCount} leads`,
+      skipped: skippedRecords,
+      failed: results.length - insertedCount,
+      errors: insertErrors.length > 0 ? insertErrors : undefined
     });
     
   } catch (error: any) {

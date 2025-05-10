@@ -1035,6 +1035,31 @@ export async function handleMessageStatus(status) {
           console.error(`Exception updating lead message_read flag:`, leadError);
         }
       }
+      
+      // For failed messages, update the lead status to "Failed"
+      if (messageStatus === 'failed' && data[0].lead_id) {
+        try {
+          // First, verify that this message is for a template (not a reply)
+          if (data[0].direction === 'outbound' && data[0].message_type === 'template') {
+            console.log(`Updating lead status to Failed for lead ${data[0].lead_id} (failed outbound template message)`);
+            
+            const { error: leadUpdateError } = await supabase
+              .from('leads')
+              .update({ status: 'Failed' })
+              .eq('id', data[0].lead_id);
+              
+            if (leadUpdateError) {
+              console.error(`Error updating lead status to Failed for lead ${data[0].lead_id}:`, leadUpdateError);
+            } else {
+              console.log(`Updated lead status to Failed for lead ${data[0].lead_id}`);
+            }
+          } else {
+            console.log(`Not updating lead status - not an outbound template message`);
+          }
+        } catch (leadError) {
+          console.error(`Exception updating lead status:`, leadError);
+        }
+      }
     } else {
       console.log(`No message found with ID ${id} for status update`);
     }
