@@ -47,6 +47,22 @@ const colors = [
 // WhatsApp brand colors
 const WHATSAPP_GREEN = '#25D366';
 
+// Add these new interfaces for progress tracking
+interface OutreachProgress {
+  source: string;
+  last_processed_index: number;
+  user_id: string;
+  timestamp: string;
+}
+
+interface BatchProcessingStats {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  retried: number;
+  rateLimit: number;
+}
+
 // Function to normalize phone numbers to a consistent international format
 function normalizePhoneNumber(phone: string): string {
   if (!phone) return '';
@@ -435,6 +451,26 @@ export default function SourceDistribution() {
         throw new Error(`Daily message limit of ${messageLimit} reached. Try again tomorrow.`);
       }
       
+      // Check if we have a previously saved progress for this source
+      let startIndex = 0;
+      const { data: progressData, error: progressError } = await supabase
+        .from('outreach_progress')
+        .select('*')
+        .eq('user_id', user?.id)
+        .eq('source', source)
+        .single();
+      
+      if (progressData && !progressError) {
+        // Ask user if they want to resume from where they left off
+        const shouldResume = window.confirm(
+          `You previously sent ${progressData.last_processed_index} messages for this source. Would you like to resume from where you left off?`
+        );
+        if (shouldResume) {
+          startIndex = progressData.last_processed_index;
+          toast.info(`Resuming from message ${startIndex + 1}`);
+        }
+      }
+      
       // Find all leads for this source using pagination
       let allLeads: any[] = [];
       let hasMore = true;
@@ -481,84 +517,173 @@ export default function SourceDistribution() {
       }
       
       // Limit leads to process based on remaining message quota
-      const leadsToProcess = allLeads.slice(0, remainingMessages);
+      const leadsToProcess = allLeads.slice(startIndex, startIndex + remainingMessages);
       
       // Notify if we're not processing all leads due to limits
-      if (leadsToProcess.length < allLeads.length) {
-        toast.info(`Processing ${leadsToProcess.length} out of ${allLeads.length} leads due to daily message limit.`);
+      if (leadsToProcess.length < allLeads.length - startIndex) {
+        toast.info(`Processing ${leadsToProcess.length} out of ${allLeads.length - startIndex} remaining leads due to daily message limit.`);
       }
       
-      // Create a throttled process to send messages (to prevent hitting API limits)
-      let succeeded = 0;
-      let failed = 0;
-      
-      for (const lead of leadsToProcess) {
-        // Actual WhatsApp API call instead of simulation
-        try {
-          console.log('Processing lead:', lead.name, lead.phone);
+      // Settings for batch processing
+      const BATCH_SIZE = 20; // Process 20 messages at a time 
+      const BATCH_DELAY = 1000; // 1 second delay between batches to avoid rate limits
+      const MAX_RETRIES = 5;
+      const INITIAL_RETRY_DELAY = 2000; // 2 seconds
+
+      // Stats tracking
+      const stats: BatchProcessingStats = {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        retried: 0,
+        rateLimit: 0
+      };
+
+      // Progress notification
+      const progressToast = toast.loading(`Processing 0/${leadsToProcess.length} leads...`, {
+        id: 'outreach-progress',
+        duration: Infinity
+      });
+
+      // Process in smaller batches with pause between batches
+      for (let i = 0; i < leadsToProcess.length; i += BATCH_SIZE) {
+        const batch = leadsToProcess.slice(i, i + BATCH_SIZE);
+        
+        // Update progress toast
+        toast.loading(`Processing ${i}/${leadsToProcess.length} leads... (${stats.succeeded} sent, ${stats.failed} failed)`, {
+          id: 'outreach-progress'
+        });
+
+        // Process this batch
+        const batchPromises = batch.map(async (lead, batchIndex) => {
+          // Add a small delay for each message within the batch to spread them out 
+          // This creates approximately 20 messages per second
+          await new Promise(resolve => setTimeout(resolve, (batchIndex * 50))); // 50ms between messages = 20/second
+        
+          let retryCount = 0;
+          let retryDelay = INITIAL_RETRY_DELAY;
           
-          // Normalize the phone number before sending
-          const normalizedPhone = normalizePhoneNumber(lead.phone);
-          console.log(`Normalized phone: ${lead.phone} → ${normalizedPhone}`);
-          
-          // Send the WhatsApp template message with lead details
-          const response = await sendWhatsAppTemplateMessage(normalizedPhone, templateId, templateLanguage, lead.id, lead.name);
-          
-          // Check if message was sent successfully
-          const success = response && response.success;
-          console.log('WhatsApp API response:', response);
-          
-          if (success) {
-            // Update lead status to Contacted
-            const { error: updateError } = await supabase
-              .from('leads')
-              .update({ status: 'Contacted' })
-              .eq('id', lead.id);
-            
-            if (updateError) {
-              console.error('Error updating lead status:', updateError);
-              failed++;
-            } else {
-              // The conversation is already recorded in the API route
-              // Do not create a duplicate record here
+          while (retryCount <= MAX_RETRIES) {
+            try {
+              stats.attempted++;
+              console.log('Processing lead:', lead.name, lead.phone);
               
-              // Increment used messages count
-              setMessagesUsedToday(prev => prev + 1);
-              succeeded++;
+              // Normalize the phone number before sending
+              const normalizedPhone = normalizePhoneNumber(lead.phone);
+              console.log(`Normalized phone: ${lead.phone} → ${normalizedPhone}`);
+              
+              // Send the WhatsApp template message with lead details
+              const response = await sendWhatsAppTemplateMessage(normalizedPhone, templateId, templateLanguage, lead.id, lead.name);
+              
+              // Check if message was sent successfully
+              const success = response && response.success;
+              console.log('WhatsApp API response:', response);
+              
+              if (success) {
+                // Update lead status to Contacted
+                const { error: updateError } = await supabase
+                  .from('leads')
+                  .update({ status: 'Contacted' })
+                  .eq('id', lead.id);
+                
+                if (updateError) {
+                  console.error('Error updating lead status:', updateError);
+                  stats.failed++;
+                } else {
+                  // The conversation is already recorded in the API route
+                  // Do not create a duplicate record here
+                  
+                  // Increment used messages count
+                  setMessagesUsedToday(prev => prev + 1);
+                  stats.succeeded++;
+                }
+
+                // Update progress in database for resume capability
+                await supabase
+                  .from('outreach_progress')
+                  .upsert({
+                    source: source,
+                    last_processed_index: startIndex + i + batchIndex + 1,
+                    user_id: user?.id,
+                    timestamp: new Date().toISOString()
+                  });
+
+                // Success - break out of retry loop
+                break;
+              } else {
+                // Update lead status to Failed
+                const { error: updateError } = await supabase
+                  .from('leads')
+                  .update({ status: 'Failed' })
+                  .eq('id', lead.id);
+                
+                if (updateError) {
+                  console.error('Error updating lead status:', updateError);
+                }
+                
+                // Record failed conversation
+                const { data: convData, error: convError } = await supabase
+                  .from('lead_conversations')
+                  .insert({
+                    user_id: user?.id,
+                    lead_id: lead.id,
+                    template_id: templateId,
+                    language: templateLanguage,
+                    status: 'failed',
+                    created_at: new Date().toISOString()
+                  });
+                
+                if (convError) {
+                  console.error('Error recording failed conversation:', convError);
+                }
+                
+                stats.failed++;
+                break; // Not a rate limit, just a standard failure
+              }
+            } catch (error: any) {
+              console.error('Error sending message:', error);
+              
+              const isRateLimit = error.message && (
+                error.message.includes('429') || 
+                error.message.includes('131042') || 
+                error.message.includes('131047') ||
+                error.message.includes('throttle')
+              );
+              
+              if (isRateLimit && retryCount < MAX_RETRIES) {
+                // Rate limited, back off exponentially
+                retryCount++;
+                stats.retried++;
+                stats.rateLimit++;
+                console.log(`Rate limited. Retrying in ${retryDelay}ms (attempt ${retryCount}/${MAX_RETRIES})`);
+                
+                // Notify about rate limiting
+                if (retryCount === 1) {
+                  toast.warning(`Hit rate limit. Retrying with exponential backoff.`, {
+                    id: 'rate-limit-warning',
+                    duration: 3000
+                  });
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+                retryDelay *= 2; // Double the delay for next retry
+              } else {
+                // Max retries or not a rate limit error
+                stats.failed++;
+                
+                // Update lead status to Failed for non-rate limit errors or max retries
+                const { error: updateError } = await supabase
+                  .from('leads')
+                  .update({ status: 'Failed' })
+                  .eq('id', lead.id);
+                  
+                if (updateError) {
+                  console.error('Error updating lead status:', updateError);
+                }
+                
+                break;
+              }
             }
-          } else {
-            // Update lead status to Failed
-            const { error: updateError } = await supabase
-              .from('leads')
-              .update({ status: 'Failed' })
-              .eq('id', lead.id);
-            
-            if (updateError) {
-              console.error('Error updating lead status:', updateError);
-            }
-            
-            // Record failed conversation - only for failures since successful ones
-            // are recorded in the API
-            const { data: convData, error: convError } = await supabase
-              .from('lead_conversations')
-              .insert({
-                user_id: user?.id,
-                lead_id: lead.id,
-                template_id: templateId,
-                language: templateLanguage,
-                status: 'failed',
-                created_at: new Date().toISOString()
-              });
-            
-            if (convError) {
-              console.error('Error recording failed conversation:', convError);
-              console.error('Attempted to insert with template_id:', templateId);
-              console.error('Using language:', templateLanguage);
-              console.error('Schema issue? Check if lead_conversations table exists and has expected columns');
-            }
-            
-            // Do not increment message count for failed messages
-            failed++;
           }
           
           // Update the UI to show progress
@@ -566,32 +691,46 @@ export default function SourceDistribution() {
             prevData.map(item => 
               item.source === source ? { 
                 ...item, 
-                contacted: item.contacted + (success ? 1 : 0),
-                failed: item.failed + (success ? 0 : 1)
+                contacted: item.contacted + (stats.succeeded > 0 ? 1 : 0),
+                failed: item.failed + (stats.failed > 0 ? 1 : 0)
               } : item
             )
           );
-          
-        } catch (e) {
-          console.error('Error sending message:', e);
-          failed++;
-        }
+        });
         
-        // Add a small delay between API calls to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait for all messages in this batch to be processed
+        await Promise.all(batchPromises);
+        
+        // Add a pause between batches to avoid rate limits
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+        
+        // Check if we should terminate early
+        if (stats.rateLimit > 30) {
+          toast.error("Too many rate limit errors. Pausing outreach to prevent account issues.", {
+            id: 'outreach-progress',
+            duration: 5000
+          });
+          break;
+        }
       }
       
-      if (succeeded + failed === leadsToProcess.length) {
-        const remainingLeads = allLeads.length - leadsToProcess.length;
-        if (remainingLeads > 0) {
-          toast.success(`Completed: ${succeeded} messages sent, ${failed} failed. ${remainingLeads} leads remaining due to daily limit.`);
-        } else {
-          toast.success(`Completed: ${succeeded} messages sent, ${failed} failed.`);
-        }
+      // Close the progress toast
+      toast.success(`Completed: ${stats.succeeded} messages sent, ${stats.failed} failed${stats.retried > 0 ? `, ${stats.retried} retries` : ''}.`, {
+        id: 'outreach-progress',
+        duration: 5000
+      });
+      
+      // Check if we have more leads to process on next run
+      const remainingLeads = allLeads.length - (startIndex + leadsToProcess.length);
+      if (remainingLeads > 0) {
+        toast.info(`${remainingLeads} leads remaining for future outreach.`);
       }
+      
     } catch (error: any) {
       console.error('Error initiating conversations:', error);
-      toast.error(`Failed to initiate conversations: ${error.message}`);
+      toast.error(`Failed to initiate conversations: ${error.message}`, {
+        id: 'outreach-progress'
+      });
     } finally {
       setInitiatingSource(null);
       

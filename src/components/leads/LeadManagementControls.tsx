@@ -6,7 +6,8 @@ import {
   FileIcon, 
   PlusCircleIcon,
   FilterIcon,
-  ChevronDownIcon
+  ChevronDownIcon,
+  Trash2Icon
 } from 'lucide-react';
 import { 
   Input,
@@ -44,6 +45,7 @@ interface LeadManagementControlsProps {
   isUploadingCSV: boolean;
   handleCSVUpload: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   openAddLeadDialog: () => void;
+  handleBatchDeleteBySource: (source: string) => Promise<void>;
 }
 
 // Animation variants
@@ -69,7 +71,8 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
   uniqueSources,
   isUploadingCSV,
   handleCSVUpload,
-  openAddLeadDialog
+  openAddLeadDialog,
+  handleBatchDeleteBySource
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -149,6 +152,26 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
                 </SelectGroup>
               </SelectContent>
             </Select>
+            {sourceFilter !== 'all' && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleBatchDeleteBySource(sourceFilter)}
+                      className="h-8 w-8 mx-1 text-red-500 hover:bg-red-50 hover:text-red-600"
+                      aria-label={`Delete all leads from ${sourceFilter}`}
+                    >
+                      <Trash2Icon className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <Small>Delete all leads from {sourceFilter}</Small>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </Flex>
         </Flex>
         

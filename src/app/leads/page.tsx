@@ -280,6 +280,56 @@ export default function LeadsPage() {
     }
   };
 
+  const handleBatchDeleteBySource = async (source: string) => {
+    if (source === 'all') {
+      toast.error('Please select a specific source to delete');
+      return;
+    }
+    
+    const sourceLeads = leads.filter(lead => lead.source === source);
+    
+    if (sourceLeads.length === 0) {
+      toast.info('No leads found for this source');
+      return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete all ${sourceLeads.length} leads from "${source}"? This action cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      // Get current session for authentication
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      
+      if (!accessToken) {
+        toast.error('Authentication error: Please log in again');
+        return;
+      }
+      
+      const response = await fetch(`/api/leads/batch?source=${encodeURIComponent(source)}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete leads');
+      }
+      
+      toast.success(`Successfully deleted ${result.count || 'all'} leads from "${source}"`);
+      
+      // Refresh leads
+      fetchLeads();
+    } catch (error: any) {
+      console.error('Error batch deleting leads:', error);
+      toast.error(error.message || 'Failed to delete leads');
+    }
+  };
+
   return (
     <DashboardLayout>
       <Container className="w-full" size="full" padding="none">
@@ -315,6 +365,7 @@ export default function LeadsPage() {
             isUploadingCSV={isUploadingCSV}
             handleCSVUpload={handleFileSelection}  // Updated to use new file selection handler
             openAddLeadDialog={() => setIsAddLeadDialogOpen(true)}
+            handleBatchDeleteBySource={handleBatchDeleteBySource}
           />
 
         {error && (
