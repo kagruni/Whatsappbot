@@ -31,8 +31,8 @@ export function verifyWhatsAppWebhook(mode, token, challenge, verifyToken) {
   }
 }
 
-// Process WhatsApp webhook
-export async function processWhatsAppWebhook(body) {
+// Process webhook
+export async function processWhatsAppWebhook(body, incomingPhoneNumberId) {
   console.log('Processing webhook payload:', JSON.stringify(body, null, 2));
 
   if (body.object === 'whatsapp_business_account') {
@@ -85,7 +85,8 @@ export async function processWhatsAppWebhook(body) {
               type: messageType,
               text: { body: userMessage },
               context: message.context,
-              id: message.id // Pass the message ID
+              id: message.id, // Pass the message ID
+              incomingPhoneNumberId: incomingPhoneNumberId // Pass the phone number ID
             });
           } catch (error) {
             console.error('Error handling message:', error);
@@ -219,13 +220,39 @@ export async function handleMessage(message) {
     // Get lead info including the assigned userId if available
     const leadData = leadInfo.get(phoneNumber) || { name: 'WhatsApp User' };
     
-    // Use assigned userId from lead info if available, otherwise try to resolve from phone
+    // Use assigned userId from lead info if available,
+    // Otherwise, use the incoming phone number ID to find the correct user
     let userId = leadData.userId;
+    
+    if (!userId && message.incomingPhoneNumberId) {
+      // Try to find user associated with the incoming phone number ID (the one that received the message)
+      try {
+        const { data, error } = await supabase
+          .from('user_settings')
+          .select('user_id')
+          .eq('whatsapp_phone_id', message.incomingPhoneNumberId)
+          .limit(1);
+        
+        if (!error && data && data.length > 0) {
+          userId = data[0].user_id;
+          console.log(`Found user ${userId} associated with incoming phone number ID ${message.incomingPhoneNumberId}`);
+        } else {
+          console.log(`No user found with WhatsApp phone number ID: ${message.incomingPhoneNumberId}`);
+          // If no user found by incoming phone number ID, don't process the message
+          console.log('Not processing message as incoming phone number ID does not match any user');
+          return false;
+        }
+      } catch (err) {
+        console.error(`Error finding user by incoming phone number ID: ${message.incomingPhoneNumberId}`, err);
+        // If there's an error, don't process the message
+        return false;
+      }
+    }
+    
+    // If we still don't have a user ID (which could happen if leadData.userId existed but was null/undefined)
     if (!userId) {
-      userId = await userSettings.getUserIdByPhone(phoneNumber);
-      console.log(`Resolved phone ${phoneNumber} to user ${userId} from phone mapping`);
-    } else {
-      console.log(`Using assigned user ${userId} for phone ${phoneNumber} from lead info`);
+      console.log('No user ID available for processing this message');
+      return false;
     }
 
     // Find existing lead ID for this phone number
@@ -562,7 +589,7 @@ export async function handleMessage(message) {
 
       // Send the AI response back to the user
       console.log(`Sending AI response to WhatsApp for lead ID: ${leadId}`);
-      await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse, leadId);
+      await sendWhatsAppMessageForUser(userId, phoneNumber, aiResponse, leadId, message.incomingPhoneNumberId);
       console.log('AI response sent successfully');
     } catch (error) {
       console.error('Error generating or sending AI response:', error);
@@ -627,8 +654,39 @@ async function generateAIResponseForUser(messages, userId) {
 }
 
 // Send WhatsApp message for user
-async function sendWhatsAppMessageForUser(userId, to, message, leadId = null) {
-  const phoneNumberId = await userSettings.getWhatsAppPhoneNumberId(userId);
+export async function sendWhatsAppMessageForUser(userId, to, message, leadId = null, incomingPhoneNumberId = null) {
+  // If we have the incoming phone number ID, verify it matches the user's phone ID
+  // This ensures we reply with the same number that received the message
+  let phoneNumberId = null;
+  
+  if (incomingPhoneNumberId) {
+    // Confirm this incoming phone ID belongs to the user
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('whatsapp_phone_id')
+      .eq('user_id', userId)
+      .single();
+      
+    if (!error && data && data.whatsapp_phone_id) {
+      // Only use the phone ID if it matches the incoming one
+      if (data.whatsapp_phone_id === incomingPhoneNumberId) {
+        console.log(`Using incoming phone ID ${incomingPhoneNumberId} which belongs to user ${userId}`);
+        phoneNumberId = incomingPhoneNumberId;
+      } else {
+        console.log(`ERROR: Incoming phone ID ${incomingPhoneNumberId} does not match user's phone ID ${data.whatsapp_phone_id}`);
+        throw new Error(`Inconsistent phone number IDs between user and incoming message`);
+      }
+    } else {
+      console.log(`ERROR: Could not find WhatsApp phone ID for user ${userId}`);
+      throw new Error(`No WhatsApp phone ID found for user ${userId}`);
+    }
+  } else {
+    // If no incoming phone ID is provided, this is likely a direct message not from webhook
+    // In this case, use the user's default phone ID
+    phoneNumberId = await userSettings.getWhatsAppPhoneNumberId(userId);
+    console.log(`No incoming phone ID provided, using user's default: ${phoneNumberId}`);
+  }
+  
   const token = await userSettings.getWhatsAppToken(userId);
   
   console.log(`Preparing to send WhatsApp message for user ${userId}:`, {

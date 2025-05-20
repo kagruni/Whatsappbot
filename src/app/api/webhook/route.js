@@ -193,7 +193,7 @@ export async function POST(request) {
         console.log(`Webhook contains ${messageCount} messages, processing...`);
         
         // Process the webhook with our handler
-        const result = await processWhatsAppWebhook(body);
+        const result = await processWhatsAppWebhook(body, phoneNumberId);
         console.log('Webhook processing result:', result);
         
         if (result) {
