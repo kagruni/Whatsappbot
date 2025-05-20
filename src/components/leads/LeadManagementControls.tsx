@@ -117,7 +117,6 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
                 style={{ boxShadow: 'none' }}
               >
                 <SelectValue placeholder="All Statuses" />
-                <ChevronDownIcon className="h-4 w-4 ml-2 opacity-50" />
               </SelectTrigger>
               <SelectContent className="bg-white">
                 <SelectGroup>
@@ -141,7 +140,6 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
                 style={{ boxShadow: 'none' }}
               >
                 <SelectValue placeholder="All Sources" />
-                <ChevronDownIcon className="h-4 w-4 ml-2 opacity-50" />
               </SelectTrigger>
               <SelectContent className="bg-white">
                 <SelectGroup>
@@ -166,8 +164,8 @@ const LeadManagementControls: React.FC<LeadManagementControlsProps> = ({
                       <Trash2Icon className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
-                    <Small>Delete all leads from {sourceFilter}</Small>
+                  <TooltipContent className="bg-gray-800 text-white px-3 py-2 rounded shadow-lg border-0">
+                    <Small className="text-white font-medium">Delete all leads from {sourceFilter}</Small>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
