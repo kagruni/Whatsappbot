@@ -449,8 +449,40 @@ export async function handleMessage(message) {
       }
     }
     
+    // If no existing lead found, create a new one
+    if (!leadId) {
+      console.log(`No existing lead found for phone ${phoneNumber}, creating new lead`);
+      try {
+        const { data: newLead, error: createError } = await supabase
+          .from('leads')
+          .insert({
+            name: leadData.name || 'WhatsApp User',
+            phone_number: phoneNumber,
+            phone: phoneNumber, // Also populate the phone field for compatibility
+            status: 'New',
+            user_id: userId
+          })
+          .select('id')
+          .single();
+        
+        if (createError) {
+          console.error('Error creating new lead:', createError);
+          throw createError;
+        }
+        
+        leadId = newLead.id;
+        console.log(`Created new lead with ID: ${leadId} for phone: ${phoneNumber}`);
+      } catch (createError) {
+        console.error('Failed to create new lead:', createError);
+        // Continue without leadId - this will likely cause the message save to fail, but we'll see the error
+      }
+    }
+    
+    console.log(`Final leadId for message processing: ${leadId}`);
+    
     // Store the incoming message in the database
-    const { data: messageRecord } = await supabase
+    console.log(`Attempting to store incoming message in database for user ${userId}, lead ${leadId}`);
+    const { data: messageRecord, error: messageError } = await supabase
       .from('lead_conversations')
       .insert({
         user_id: userId,
@@ -465,6 +497,20 @@ export async function handleMessage(message) {
       })
       .select('id')
       .single();
+
+    if (messageError) {
+      console.error('CRITICAL ERROR: Failed to store incoming message in database:', messageError);
+      console.error('Message details:', {
+        user_id: userId,
+        lead_id: leadId,
+        message_id: message.id,
+        message_content: userMessage,
+        direction: 'inbound'
+      });
+      // Don't throw here - we want to continue processing even if DB save fails temporarily
+    } else {
+      console.log(`Successfully stored incoming message in database with record ID: ${messageRecord?.id}`);
+    }
 
     // Update lead status to "Replied" if a lead ID was found
     if (leadId) {

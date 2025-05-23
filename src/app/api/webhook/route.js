@@ -178,6 +178,7 @@ export async function POST(request) {
         // Look for messages in the webhook payload
         let hasMessages = false;
         let messageCount = 0;
+        let messageDetails = [];
         
         for (const entry of body.entry) {
           if (!entry.changes || !Array.isArray(entry.changes)) continue;
@@ -186,8 +187,24 @@ export async function POST(request) {
             if (change.value && change.value.messages && Array.isArray(change.value.messages)) {
               hasMessages = true;
               messageCount += change.value.messages.length;
+              
+              // Log message details for debugging
+              change.value.messages.forEach(msg => {
+                messageDetails.push({
+                  id: msg.id,
+                  from: msg.from,
+                  type: msg.type,
+                  text: msg.text?.body || 'non-text message',
+                  timestamp: msg.timestamp
+                });
+              });
             }
           }
+        }
+        
+        console.log(`WEBHOOK SUMMARY: Found ${messageCount} messages`);
+        if (messageDetails.length > 0) {
+          console.log('Message details:', messageDetails);
         }
         
         console.log(`Webhook contains ${messageCount} messages, processing...`);

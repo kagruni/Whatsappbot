@@ -150,7 +150,6 @@ export async function GET(request: Request) {
           .from('conversation_view')
           .select('message_content, created_at, direction, message_type, template_id, status')
           .eq('lead_id', lead.lead_id)
-          .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(1)
           .single();
@@ -301,7 +300,6 @@ export async function POST(request: Request) {
       .from('conversation_view')
       .select('*')
       .eq('lead_id', leadId)
-      .eq('user_id', userId)
       .order('created_at', { ascending: true })
       .limit(limit);
     
