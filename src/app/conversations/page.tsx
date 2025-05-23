@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HiOutlineSearch, HiOutlinePaperClip, HiOutlineEmojiHappy, HiOutlineMicrophone, HiDotsVertical, HiOutlinePaperAirplane } from 'react-icons/hi';
@@ -93,46 +93,113 @@ interface Conversation {
 
 export default function ConversationsPage() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [allContacts, setAllContacts] = useState<Contact[]>([]);
+  const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [error, setError] = useState('');
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMorePages, setHasMorePages] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  
+  // For scrolling
+  const contactsListRef = useRef<HTMLDivElement>(null);
+  const messageEndRef = useRef<HTMLDivElement>(null);
   
   // Use the auth context hook
   const { user, loading: authLoading } = useAuth();
   
+  // Helper function to get status styling
+  const getStatusStyle = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'replied':
+        return {
+          backgroundColor: '#10b981', // green
+          color: 'white'
+        };
+      case 'contacted':
+        return {
+          backgroundColor: '#3b82f6', // blue
+          color: 'white'
+        };
+      case 'failed':
+        return {
+          backgroundColor: '#ef4444', // red
+          color: 'white'
+        };
+      case 'pending':
+        return {
+          backgroundColor: '#f59e0b', // amber
+          color: 'white'
+        };
+      default:
+        return {
+          backgroundColor: '#6b7280', // gray
+          color: 'white'
+        };
+    }
+  };
+  
+  // Scroll to bottom of messages when new messages arrive
+  useEffect(() => {
+    if (messageEndRef.current) {
+      messageEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
+  
   // Fetch conversations with auth handling
-  const fetchContacts = async () => {
+  const fetchContacts = useCallback(async (isInitialLoad = false, isPolling = false, pageToLoad = 1) => {
     if (authLoading) return; // Wait for auth state to resolve
     
     if (!user) {
       setError('You need to be logged in to view conversations.');
-      setLoading(false);
+      setInitialLoading(false);
       return;
     }
     
     try {
-      setLoading(true);
+      // Set appropriate loading states
+      if (isInitialLoad) {
+        setInitialLoading(true);
+        setError(''); // Clear any previous errors
+      } else if (isPolling) {
+        setRefreshing(true);
+      } else if (pageToLoad > 1) {
+        setLoadingMore(true);
+      }
       
       // Get auth session for API call
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
         setError('Your session has expired. Please log in again.');
-        setLoading(false);
+        setInitialLoading(false);
+        setRefreshing(false);
+        setLoadingMore(false);
         return;
       }
       
+      // Add timeout to the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
       // Get conversations with auth token
-      const response = await fetch(`/api/conversations?search=${searchTerm}`, {
+      const response = await fetch(`/api/conversations?search=${encodeURIComponent(searchTerm)}&page=${pageToLoad}&limit=100`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`
-        }
+        },
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         if (response.status === 401) {
@@ -148,53 +215,154 @@ export default function ConversationsPage() {
             setError(`Failed to load conversations: ${response.statusText}`);
           }
         }
-        setLoading(false);
+        setInitialLoading(false);
+        setRefreshing(false);
+        setLoadingMore(false);
         return;
       }
       
       const data = await response.json();
       console.log('Conversations fetched:', data.conversations?.length || 0);
-      setContacts(data.conversations || []);
       
-      // Select the first contact if none is selected and we have contacts
-      if (data.conversations?.length > 0 && !selectedContact) {
-        setSelectedContact(data.conversations[0]);
-        fetchMessages(data.conversations[0].id);
+      const newContacts = data.conversations || [];
+      
+      // Handle pagination
+      if (pageToLoad === 1 || isInitialLoad) {
+        // Replace all contacts for first page or initial load
+        setAllContacts(newContacts);
+        setCurrentPage(1);
+      } else {
+        // Append contacts for subsequent pages with deduplication
+        setAllContacts(prev => {
+          const existingIds = new Set(prev.map(contact => contact.id));
+          const uniqueNewContacts = newContacts.filter((contact: Contact) => !existingIds.has(contact.id));
+          console.log(`Page ${pageToLoad}: Received ${newContacts.length} contacts, ${uniqueNewContacts.length} unique after deduplication`);
+          return [...prev, ...uniqueNewContacts];
+        });
+        setCurrentPage(pageToLoad);
+      }
+      
+      // Update pagination state
+      setHasMorePages(data.pagination?.hasMore || false);
+      
+      // Apply search filtering (only if not loading more pages)
+      if (pageToLoad === 1 || isInitialLoad) {
+        // Filter out failed conversations and apply search filter
+        let filtered = newContacts.filter((contact: Contact) => contact.status !== 'failed');
+        
+        if (searchTerm) {
+          filtered = filtered.filter((contact: Contact) => 
+            contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            contact.phone.includes(searchTerm) ||
+            contact.lastMessage.toLowerCase().includes(searchTerm.toLowerCase())
+          );
+        }
+        setFilteredContacts(filtered);
+      } else {
+        // For additional pages, filter and append to existing filtered results with deduplication
+        const filtered = newContacts.filter((contact: Contact) => contact.status !== 'failed');
+        setFilteredContacts(prev => {
+          const existingIds = new Set(prev.map(contact => contact.id));
+          const uniqueFiltered = filtered.filter((contact: Contact) => !existingIds.has(contact.id));
+          return [...prev, ...uniqueFiltered];
+        });
+      }
+      
+      // Handle selection of first contact on initial load
+      if (isInitialLoad && newContacts.length > 0 && !selectedContact) {
+        const firstContact = newContacts[0];
+        setSelectedContact(firstContact);
+        fetchMessages(firstContact.id);
+      }
+      
+      // If polling and we have a selected contact, try to keep it selected
+      if (isPolling && selectedContact) {
+        // Find the updated version of the selected contact
+        const allCurrentContacts = pageToLoad === 1 ? newContacts : [...allContacts, ...newContacts];
+        const updatedSelectedContact = allCurrentContacts.find(
+          (contact: Contact) => contact.id === selectedContact.id
+        );
+        
+        // Update selected contact if it still exists
+        if (updatedSelectedContact) {
+          setSelectedContact(updatedSelectedContact);
+        }
       }
     } catch (err: any) {
       console.error('Error fetching conversations:', err);
-      setError(err.message || 'Error loading conversations');
-      toast.error(`Failed to load conversations: ${err.message || 'Unknown error'}`);
+      
+      // Handle timeout errors specifically
+      if (err.name === 'AbortError') {
+        setError('Request timed out. The server might be busy. Please try again.');
+      } else {
+        setError(err.message || 'Error loading conversations');
+      }
+      
+      // Only show toast for non-polling errors to avoid spam
+      if (!isPolling) {
+        toast.error(`Failed to load conversations: ${err.message || 'Unknown error'}`);
+      }
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setRefreshing(false);
+      setLoadingMore(false);
     }
-  };
+  }, [authLoading, user, searchTerm, selectedContact, allContacts]);
   
-  // Effect to fetch contacts when component mounts or search term changes
+  // Effect to fetch contacts when component mounts
   useEffect(() => {
-    fetchContacts();
+    fetchContacts(true); // Initial load
     
-    // Set up polling for new messages (every 15 seconds)
-    const intervalId = setInterval(fetchContacts, 15000);
+    // Set up polling for new messages (every 30 seconds instead of 15)
+    const intervalId = setInterval(() => {
+      // Only poll if not currently loading and no errors
+      if (!initialLoading && !loadingMore && !error) {
+        fetchContacts(false, true); // Polling refresh
+      }
+    }, 30000); // Increased from 15000 to 30000
     
     return () => clearInterval(intervalId); // Clean up on unmount
-  }, [user, authLoading, searchTerm]);
+  }, [user, authLoading]); // Removed fetchContacts from dependencies
+  
+  // Effect to re-fetch contacts when search term changes
+  useEffect(() => {
+    // Debounce search to avoid excessive API calls
+    const searchTimeout = setTimeout(() => {
+      if (searchTerm !== '') {
+        // If there's a search term, fetch from API to get server-side filtering
+        setCurrentPage(1);
+        setHasMorePages(true);
+        fetchContacts(true);
+      } else {
+        // If search term is cleared, refetch to get all conversations
+        setCurrentPage(1);
+        setHasMorePages(true);
+        fetchContacts(true);
+      }
+    }, 300); // 300ms debounce
+    
+    return () => clearTimeout(searchTimeout);
+  }, [searchTerm]); // Removed fetchContacts from dependencies
   
   // Fetch messages when selecting a contact
-  const fetchMessages = async (leadId: string) => {
+  const fetchMessages = useCallback(async (leadId: string) => {
     if (!user) return;
     
     try {
-      setLoading(true);
+      setInitialLoading(true);
       
       // Get auth session for API call
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
         setError('Your session has expired. Please log in again.');
-        setLoading(false);
+        setInitialLoading(false);
         return;
       }
+      
+      // Add timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
       
       const response = await fetch('/api/conversations', {
         method: 'POST',
@@ -202,8 +370,16 @@ export default function ConversationsPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`
         },
-        body: JSON.stringify({ leadId }),
+        body: JSON.stringify({ 
+          leadId, 
+          all_sources: true,
+          include_all: true,
+          include_latest: true
+        }),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         if (response.status === 401) {
@@ -219,7 +395,7 @@ export default function ConversationsPage() {
             setError(`Failed to load messages: ${response.statusText}`);
           }
         }
-        setLoading(false);
+        setInitialLoading(false);
         return;
       }
       
@@ -227,27 +403,25 @@ export default function ConversationsPage() {
       setMessages(data.messages || []);
     } catch (err: any) {
       console.error('Error fetching messages:', err);
-      setError(err.message || 'Error loading messages');
+      
+      // Handle timeout errors specifically
+      if (err.name === 'AbortError') {
+        setError('Request timed out loading messages. Please try selecting the conversation again.');
+      } else {
+        setError(err.message || 'Error loading messages');
+      }
+      
       toast.error(`Failed to load messages: ${err.message || 'Unknown error'}`);
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
-  };
+  }, [user]);
   
   // Handle contact selection
   const handleContactSelect = (contact: Contact) => {
     setSelectedContact(contact);
     fetchMessages(contact.id);
   };
-  
-  // Filter contacts based on search term
-  const filteredContacts = contacts.filter(contact => {
-    return (
-      contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.phone.includes(searchTerm) ||
-      contact.lastMessage.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  });
   
   const handleSendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -264,6 +438,7 @@ export default function ConversationsPage() {
     
     setMessages(prev => [...prev, newMessage]);
     setMessageInput('');
+    setSendingMessage(true);
     
     // Send message to API
     try {
@@ -283,7 +458,8 @@ export default function ConversationsPage() {
         body: JSON.stringify({
           phoneNumber: selectedContact.phone,
           message: messageInput,
-          leadId: selectedContact.id
+          leadId: selectedContact.id,
+          all_sources: true
         }),
       });
       
@@ -295,6 +471,35 @@ export default function ConversationsPage() {
       
       // Refresh messages to get the actual message record
       await fetchMessages(selectedContact.id);
+      
+      // Update the contact's last message in the contacts list
+      const updatedContact = {
+        ...selectedContact,
+        lastMessage: messageInput,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      
+      // Update contacts array
+      setAllContacts(prevContacts => {
+        const updatedContacts = prevContacts.map(contact => 
+          contact.id === selectedContact.id ? updatedContact : contact
+        );
+        return updatedContacts;
+      });
+      
+      // Also update in filtered contacts to ensure UI updates
+      setFilteredContacts(prevFiltered => {
+        const updatedFiltered = prevFiltered.map(contact => 
+          contact.id === selectedContact.id ? updatedContact : contact
+        );
+        return updatedFiltered;
+      });
+      
+      // Update selected contact
+      setSelectedContact(updatedContact);
+      
+      // Show a success toast
+      toast.success('Message sent successfully');
     } catch (err: any) {
       console.error('Error sending message:', err);
       setError(err.message || 'Error sending message');
@@ -302,8 +507,33 @@ export default function ConversationsPage() {
       
       // Remove the temporary message if it failed
       setMessages(prev => prev.filter(msg => msg.id !== tempId));
+    } finally {
+      setSendingMessage(false);
     }
   };
+
+  // Handle infinite scroll
+  const handleScroll = useCallback(() => {
+    if (!contactsListRef.current || loadingMore || !hasMorePages) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = contactsListRef.current;
+    
+    // Load more when scrolled to bottom (with some buffer)
+    if (scrollTop + clientHeight >= scrollHeight - 100) {
+      console.log(`Loading more conversations - current page: ${currentPage}, hasMore: ${hasMorePages}, total contacts: ${filteredContacts.length}`);
+      const nextPage = currentPage + 1;
+      fetchContacts(false, false, nextPage);
+    }
+  }, [loadingMore, hasMorePages, currentPage, fetchContacts]);
+  
+  // Add scroll listener
+  useEffect(() => {
+    const contactsList = contactsListRef.current;
+    if (contactsList) {
+      contactsList.addEventListener('scroll', handleScroll);
+      return () => contactsList.removeEventListener('scroll', handleScroll);
+    }
+  }, [handleScroll]);
 
   return (
     <DashboardLayout>
@@ -414,12 +644,14 @@ export default function ConversationsPage() {
           
           {/* Contacts list */}
           <motion.div 
+            ref={contactsListRef}
             style={{ 
               flex: '1 1 0%', 
               overflowY: 'auto',
+              position: 'relative',
             }}
           >
-            {loading && contacts.length === 0 ? (
+            {initialLoading && filteredContacts.length === 0 ? (
               <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
                 Loading conversations...
               </div>
@@ -428,99 +660,172 @@ export default function ConversationsPage() {
                 No conversations found
               </div>
             ) : (
-              <AnimatePresence>
-                {filteredContacts.map((contact, index) => (
-                  <motion.div
-                    key={contact.id}
-                    variants={contactVariants}
-                    custom={index}
-                    initial="hidden"
-                    animate="visible"
-                    transition={{ delay: index * 0.03 }}
-                    whileHover={{ backgroundColor: selectedContact?.id === contact.id ? '#e5e7eb' : '#f5f7f9' }}
-                    onClick={() => handleContactSelect(contact)}
-                    style={{
-                      padding: '0.75rem 1rem',
-                      borderBottom: '1px solid #e5e7eb',
-                      cursor: 'pointer',
-                      backgroundColor: selectedContact?.id === contact.id ? '#f0f2f5' : 'white',
-                      display: 'flex',
-                      alignItems: 'center',
-                      position: 'relative',
-                    }}
-                  >
-                    <motion.div 
-                      whileHover={{ scale: 1.05 }}
+              <>
+                {/* Refreshing indicator */}
+                {refreshing && (
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: '0.5rem', 
+                    right: '0.5rem',
+                    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                    color: 'white',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '9999px',
+                    zIndex: 10,
+                  }}>
+                    Updating...
+                  </div>
+                )}
+                
+                {/* Conversation list */}
+                <AnimatePresence>
+                  {filteredContacts.map((contact, index) => (
+                    <motion.div
+                      key={contact.id}
+                      variants={contactVariants}
+                      custom={index}
+                      initial="hidden"
+                      animate="visible"
+                      transition={{ delay: Math.min(index * 0.01, 0.2) }}
+                      whileHover={{ backgroundColor: selectedContact?.id === contact.id ? '#e5e7eb' : '#f5f7f9' }}
+                      onClick={() => handleContactSelect(contact)}
                       style={{
-                        width: '3rem',
-                        height: '3rem',
-                        borderRadius: '9999px',
-                        backgroundColor: '#e5e7eb',
+                        padding: '0.75rem 1rem',
+                        borderBottom: '1px solid #e5e7eb',
+                        cursor: 'pointer',
+                        backgroundColor: selectedContact?.id === contact.id ? '#f0f2f5' : 'white',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '1.5rem',
-                        marginRight: '0.75rem',
+                        position: 'relative',
                       }}
                     >
-                      {contact.avatar || '👤'}
+                      <motion.div 
+                        whileHover={{ scale: 1.05 }}
+                        style={{
+                          width: '3rem',
+                          height: '3rem',
+                          borderRadius: '9999px',
+                          backgroundColor: '#e5e7eb',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.5rem',
+                          marginRight: '0.75rem',
+                        }}
+                      >
+                        {contact.avatar || '👤'}
+                      </motion.div>
+                      <div style={{ flex: '1 1 0%' }}>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center' 
+                        }}>
+                          <h3 style={{ 
+                            fontWeight: 500, 
+                            fontSize: '0.9375rem',
+                            color: '#111827',
+                            flex: '1 1 0%',
+                          }}>{contact.name}</h3>
+                          {/* Status tag and timestamp stacked vertically */}
+                          <div style={{ 
+                            display: 'flex', 
+                            flexDirection: 'column',
+                            alignItems: 'flex-end', 
+                            gap: '0.25rem',
+                            flexShrink: 0,
+                          }}>
+                            <motion.span
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                              style={{
+                                ...getStatusStyle(contact.status),
+                                fontSize: '0.5rem',
+                                fontWeight: 600,
+                                padding: '0.1rem 0.25rem',
+                                borderRadius: '0.25rem',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.025em',
+                                lineHeight: 1,
+                              }}
+                            >
+                              {contact.status}
+                            </motion.span>
+                            <span style={{ 
+                              fontSize: '0.75rem', 
+                              color: contact.unread > 0 ? '#10b981' : '#6b7280',
+                              fontWeight: contact.unread > 0 ? 500 : 400,
+                              whiteSpace: 'nowrap',
+                            }}>{contact.timestamp}</span>
+                          </div>
+                        </div>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                        }}>
+                          <p style={{ 
+                            fontSize: '0.875rem', 
+                            color: '#4b5563',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            maxWidth: '13rem',
+                          }}>{contact.lastMessage}</p>
+                          {contact.unread > 0 && (
+                            <motion.span 
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                              style={{
+                                backgroundColor: '#10b981',
+                                color: 'white',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                                width: '1.25rem',
+                                height: '1.25rem',
+                                borderRadius: '9999px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {contact.unread}
+                            </motion.span>
+                          )}
+                        </div>
+                      </div>
                     </motion.div>
-                    <div style={{ flex: '1 1 0%' }}>
-                      <div style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center' 
-                      }}>
-                        <h3 style={{ 
-                          fontWeight: 500, 
-                          fontSize: '0.9375rem',
-                          color: '#111827',
-                        }}>{contact.name}</h3>
-                        <span style={{ 
-                          fontSize: '0.75rem', 
-                          color: contact.unread > 0 ? '#10b981' : '#6b7280',
-                          fontWeight: contact.unread > 0 ? 500 : 400,
-                        }}>{contact.timestamp}</span>
-                      </div>
-                      <div style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center',
-                      }}>
-                        <p style={{ 
-                          fontSize: '0.875rem', 
-                          color: '#4b5563',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          maxWidth: '13rem',
-                        }}>{contact.lastMessage}</p>
-                        {contact.unread > 0 && (
-                          <motion.span 
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                            style={{
-                              backgroundColor: '#10b981',
-                              color: 'white',
-                              fontSize: '0.75rem',
-                              fontWeight: 500,
-                              width: '1.25rem',
-                              height: '1.25rem',
-                              borderRadius: '9999px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            {contact.unread}
-                          </motion.span>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+                  ))}
+                </AnimatePresence>
+                
+                {/* Loading more indicator */}
+                {loadingMore && (
+                  <div style={{ 
+                    padding: '1rem', 
+                    textAlign: 'center', 
+                    color: '#6b7280',
+                    fontSize: '0.875rem'
+                  }}>
+                    Loading more conversations...
+                  </div>
+                )}
+                
+                {/* End of list indicator */}
+                {!hasMorePages && filteredContacts.length > 0 && (
+                  <div style={{ 
+                    padding: '1rem', 
+                    textAlign: 'center', 
+                    color: '#9ca3af',
+                    fontSize: '0.75rem'
+                  }}>
+                    You've reached the end
+                  </div>
+                )}
+              </>
             )}
           </motion.div>
         </motion.div>
@@ -618,7 +923,7 @@ export default function ConversationsPage() {
                   minHeight: 0,
                 }}
               >
-                {loading ? (
+                {initialLoading ? (
                   <div style={{ margin: 'auto', textAlign: 'center', color: '#6b7280' }}>
                     Loading messages...
                   </div>
@@ -635,7 +940,7 @@ export default function ConversationsPage() {
                         custom={index}
                         initial="hidden"
                         animate="visible"
-                        transition={{ delay: index * 0.05 }}
+                        transition={{ delay: Math.min(index * 0.02, 0.3) }}
                         style={{
                           alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
                           maxWidth: '70%',
@@ -674,6 +979,8 @@ export default function ConversationsPage() {
                         </span>
                       </motion.div>
                     ))}
+                    {/* Add element to scroll to */}
+                    <div ref={messageEndRef} style={{ height: '1px', width: '100%' }} />
                   </AnimatePresence>
                 )}
               </motion.div>
@@ -733,9 +1040,10 @@ export default function ConversationsPage() {
                   <motion.input
                     whileFocus={{ boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.2)" }}
                     type="text"
-                    placeholder="Type a message"
+                    placeholder={sendingMessage ? "Sending..." : "Type a message"}
                     value={messageInput}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessageInput(e.target.value)}
+                    disabled={sendingMessage}
                     style={{
                       flex: '1 1 0%',
                       backgroundColor: '#f0f2f5',
@@ -744,25 +1052,28 @@ export default function ConversationsPage() {
                       borderRadius: '1.25rem',
                       padding: '0.75rem 1rem',
                       fontSize: '0.9375rem',
+                      opacity: sendingMessage ? 0.8 : 1,
                     }}
                   />
                   <motion.button 
-                    type={messageInput.trim() ? 'submit' : 'button'} 
+                    type={messageInput.trim() && !sendingMessage ? 'submit' : 'button'} 
                     whileHover="hover"
                     whileTap="tap"
                     variants={buttonVariants}
+                    disabled={sendingMessage}
                     style={{
                       backgroundColor: 'transparent',
                       border: 'none',
-                      cursor: 'pointer',
+                      cursor: sendingMessage ? 'wait' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
+                      opacity: sendingMessage ? 0.7 : 1,
                     }}
                   >
                     {messageInput.trim() ? (
                       <HiOutlinePaperAirplane style={{ 
-                        color: '#10b981', 
+                        color: sendingMessage ? '#84c7ab' : '#10b981', 
                         width: '1.5rem', 
                         height: '1.5rem',
                         transform: 'rotate(90deg)'
