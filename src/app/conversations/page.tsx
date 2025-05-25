@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { HiOutlineSearch, HiOutlinePaperClip, HiOutlineEmojiHappy, HiOutlineMicrophone, HiDotsVertical, HiOutlinePaperAirplane } from 'react-icons/hi';
+import { HiOutlineSearch, HiOutlinePaperClip, HiOutlineEmojiHappy, HiOutlineMicrophone, HiDotsVertical, HiOutlinePaperAirplane, HiArrowLeft } from 'react-icons/hi';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 import supabase from '@/lib/supabase';
@@ -30,6 +30,18 @@ const panelVariants = {
       duration: 0.15, 
       ease: "easeOut" 
     } 
+  }
+};
+
+// Mobile view transition variants
+const mobileViewVariants = {
+  list: {
+    x: 0,
+    transition: { type: "spring", stiffness: 300, damping: 30 }
+  },
+  chat: {
+    x: "-100%",
+    transition: { type: "spring", stiffness: 300, damping: 30 }
   }
 };
 
@@ -103,6 +115,16 @@ export default function ConversationsPage() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [error, setError] = useState('');
   
+  // Mobile responsiveness state - Initialize correctly
+  const [isMobile, setIsMobile] = useState(() => {
+    // Check if we're in browser environment and get initial mobile state
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false; // Default to false during SSR
+  });
+  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
+  
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMorePages, setHasMorePages] = useState(true);
@@ -114,6 +136,86 @@ export default function ConversationsPage() {
   
   // Use the auth context hook
   const { user, loading: authLoading } = useAuth();
+  
+  // Check if screen is mobile size
+  useEffect(() => {
+    const checkScreenSize = () => {
+      const newIsMobile = window.innerWidth < 768; // 768px is md breakpoint in Tailwind
+      const wasAlreadyMobile = isMobile;
+      
+      console.log('Mobile detection - current:', isMobile, 'new:', newIsMobile);
+      setIsMobile(newIsMobile);
+      
+      // Only clear selection if switching FROM desktop TO mobile, not if already mobile
+      if (newIsMobile && !wasAlreadyMobile && selectedContact) {
+        console.log('Switching from desktop to mobile - clearing selection');
+        setSelectedContact(null);
+        setMobileView('list');
+      }
+    };
+    
+    checkScreenSize();
+    window.addEventListener('resize', checkScreenSize);
+    return () => window.removeEventListener('resize', checkScreenSize);
+  }, [isMobile, selectedContact]);
+  
+  // Ensure mobile starts with list view (but don't clear selected contact)
+  useEffect(() => {
+    if (isMobile && mobileView !== 'list' && !selectedContact) {
+      setMobileView('list');
+    }
+  }, [isMobile, mobileView, selectedContact]);
+  
+  // Debug mobile view changes
+  useEffect(() => {
+    console.log('Mobile view changed to:', mobileView, 'isMobile:', isMobile, 'selectedContact:', selectedContact?.name || 'none');
+  }, [mobileView, isMobile, selectedContact]);
+  
+  // Add styles for fixed menu button
+  useEffect(() => {
+    if (isMobile) {
+      // Create a style tag to fix the menu button position
+      const style = document.createElement('style');
+      style.id = 'mobile-menu-fix';
+      style.textContent = `
+        /* Fix the dashboard layout menu button on mobile */
+        [data-dashboard-layout] {
+          position: relative !important;
+        }
+        
+        /* Make the menu button fixed on mobile */
+        [data-dashboard-layout] > div:first-child {
+          position: fixed !important;
+          top: 1rem !important;
+          left: 1rem !important;
+          z-index: 9999 !important;
+          background-color: rgba(55, 65, 81, 0.95) !important;
+          backdrop-filter: blur(8px) !important;
+          border-radius: 0.75rem !important;
+          box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+        }
+        
+        /* Ensure menu button is always clickable */
+        [data-dashboard-layout] > div:first-child > * {
+          pointer-events: auto !important;
+        }
+      `;
+      document.head.appendChild(style);
+      
+      return () => {
+        const existingStyle = document.getElementById('mobile-menu-fix');
+        if (existingStyle) {
+          document.head.removeChild(existingStyle);
+        }
+      };
+    } else {
+      // Remove mobile styles on desktop
+      const existingStyle = document.getElementById('mobile-menu-fix');
+      if (existingStyle) {
+        document.head.removeChild(existingStyle);
+      }
+    }
+  }, [isMobile]);
   
   // Helper function to get status styling
   const getStatusStyle = (status: string) => {
@@ -269,14 +371,19 @@ export default function ConversationsPage() {
       }
       
       // Handle selection of first contact on initial load
-      if (isInitialLoad && newContacts.length > 0 && !selectedContact) {
-        const firstContact = newContacts[0];
-        setSelectedContact(firstContact);
-        fetchMessages(firstContact.id);
+      if (isInitialLoad && newContacts.length > 0 && !selectedContact && !isMobile) {
+        // Double-check mobile state to prevent auto-selection on mobile
+        const currentIsMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+        
+        if (!currentIsMobile) {
+          const firstContact = newContacts[0];
+          setSelectedContact(firstContact);
+          fetchMessages(firstContact.id);
+        }
       }
       
       // If polling and we have a selected contact, try to keep it selected
-      if (isPolling && selectedContact) {
+      if (isPolling && selectedContact && !isMobile) {
         // Find the updated version of the selected contact
         const allCurrentContacts = pageToLoad === 1 ? newContacts : [...allContacts, ...newContacts];
         const updatedSelectedContact = allCurrentContacts.find(
@@ -307,7 +414,7 @@ export default function ConversationsPage() {
       setRefreshing(false);
       setLoadingMore(false);
     }
-  }, [authLoading, user, searchTerm, selectedContact, allContacts]);
+  }, [authLoading, user, searchTerm, selectedContact, allContacts, isMobile]);
   
   // Effect to fetch contacts when component mounts
   useEffect(() => {
@@ -417,10 +524,29 @@ export default function ConversationsPage() {
     }
   }, [user]);
   
-  // Handle contact selection
+  // Handle contact selection with mobile view switching
   const handleContactSelect = (contact: Contact) => {
+    console.log('Selecting contact:', contact.name, 'on mobile:', isMobile);
     setSelectedContact(contact);
     fetchMessages(contact.id);
+    
+    // Switch to chat view on mobile
+    if (isMobile) {
+      console.log('Switching to chat view on mobile');
+      setMobileView('chat');
+    }
+  };
+  
+  // Handle back button for mobile
+  const handleBackToList = () => {
+    console.log('Going back to list view');
+    if (isMobile) {
+      setMobileView('list');
+      // Clear selected contact when going back to list
+      setTimeout(() => {
+        setSelectedContact(null);
+      }, 300); // Wait for animation to start before clearing
+    }
   };
   
   const handleSendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -595,512 +721,1142 @@ export default function ConversationsPage() {
           </div>
         )}
       
-        {/* Contacts list - Left side */}
-        <motion.div 
-          variants={panelVariants}
-          style={{ 
-            width: '350px', 
-            borderRight: '1px solid #e5e7eb',
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: 'white',
-            flexShrink: 0,
-          }}
-        >
-          {/* Header with search */}
+        {/* Mobile layout with sliding views */}
+        {isMobile ? (
           <div style={{ 
-            padding: '0.75rem 1rem',
-            borderBottom: '1px solid #e5e7eb',
+            position: 'relative', 
+            width: '100%', 
+            height: '100%', 
+            overflow: 'hidden',
+            maxWidth: '100vw',
+            paddingTop: isMobile ? '1rem' : '0', // Add space for fixed menu button
           }}>
+            {/* Mobile contacts list */}
             <motion.div 
-              initial={{ opacity: 0, y: -5 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
-              style={{
+              variants={mobileViewVariants}
+              animate={mobileView}
+              style={{ 
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%', 
+                height: '100%',
+                backgroundColor: 'white',
                 display: 'flex',
-                alignItems: 'center',
-                backgroundColor: '#f0f2f5',
-                borderRadius: '0.5rem',
-                padding: '0.5rem 0.75rem',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                maxWidth: '100vw',
               }}
             >
-              <HiOutlineSearch style={{ color: '#6b7280', width: '1.25rem', height: '1.25rem' }} />
-              <input
-                type="text"
-                placeholder="Search or start a new chat"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  outline: 'none',
+              {/* Header with search */}
+              <div style={{ 
+                padding: '0.75rem 1rem',
+                paddingTop: isMobile ? '5rem' : '0.75rem', // Add space for fixed menu
+                borderBottom: '1px solid #e5e7eb',
+                backgroundColor: '#25D366',
+                color: 'white',
+                flexShrink: 0,
+              }}>
+                <h1 style={{ 
+                  fontSize: '1.25rem', 
+                  fontWeight: '600',
+                  marginBottom: '0.75rem',
+                  margin: '0 0 0.75rem 0',
+                }}>
+                  WhatsApp Business
+                </h1>
+                <motion.div 
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    borderRadius: '0.5rem',
+                    padding: '0.5rem 0.75rem',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <HiOutlineSearch style={{ color: 'white', width: '1.25rem', height: '1.25rem', flexShrink: 0 }} />
+                  <input
+                    type="text"
+                    placeholder="Search conversations"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      width: '100%',
+                      marginLeft: '0.5rem',
+                      fontSize: '0.875rem',
+                      color: 'white',
+                      minWidth: 0,
+                    }}
+                  />
+                </motion.div>
+              </div>
+              
+              {/* Mobile contacts list */}
+              <motion.div 
+                ref={contactsListRef}
+                style={{ 
+                  flex: '1 1 0%', 
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  position: 'relative',
                   width: '100%',
-                  marginLeft: '0.5rem',
-                  fontSize: '0.875rem',
+                  maxWidth: '100vw',
                 }}
-              />
-            </motion.div>
-          </div>
-          
-          {/* Contacts list */}
-          <motion.div 
-            ref={contactsListRef}
-            style={{ 
-              flex: '1 1 0%', 
-              overflowY: 'auto',
-              position: 'relative',
-            }}
-          >
-            {initialLoading && filteredContacts.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
-                Loading conversations...
-              </div>
-            ) : filteredContacts.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
-                No conversations found
-              </div>
-            ) : (
-              <>
-                {/* Refreshing indicator */}
-                {refreshing && (
-                  <div style={{ 
-                    position: 'absolute', 
-                    top: '0.5rem', 
-                    right: '0.5rem',
-                    backgroundColor: 'rgba(16, 185, 129, 0.9)',
-                    color: 'white',
-                    fontSize: '0.75rem',
-                    fontWeight: 500,
-                    padding: '0.15rem 0.5rem',
-                    borderRadius: '9999px',
-                    zIndex: 10,
-                  }}>
-                    Updating...
+              >
+                {initialLoading && filteredContacts.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+                    Loading conversations...
                   </div>
+                ) : filteredContacts.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+                    No conversations found
+                  </div>
+                ) : (
+                  <>
+                    {/* Refreshing indicator */}
+                    {refreshing && (
+                      <div style={{ 
+                        position: 'absolute', 
+                        top: '0.5rem', 
+                        right: '0.5rem',
+                        backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                        color: 'white',
+                        fontSize: '0.75rem',
+                        fontWeight: 500,
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '9999px',
+                        zIndex: 10,
+                      }}>
+                        Updating...
+                      </div>
+                    )}
+                    
+                    {/* Conversation list */}
+                    <AnimatePresence>
+                      {filteredContacts.map((contact, index) => (
+                        <motion.div
+                          key={contact.id}
+                          variants={contactVariants}
+                          custom={index}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: Math.min(index * 0.01, 0.2) }}
+                          whileHover={{ backgroundColor: '#f5f7f9' }}
+                          whileTap={{ backgroundColor: '#e5e7eb' }}
+                          onClick={() => handleContactSelect(contact)}
+                          style={{
+                            padding: '1rem',
+                            borderBottom: '1px solid #e5e7eb',
+                            cursor: 'pointer',
+                            backgroundColor: 'white',
+                            display: 'flex',
+                            alignItems: 'center',
+                            position: 'relative',
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <motion.div 
+                            whileHover={{ scale: 1.05 }}
+                            style={{
+                              width: '3.5rem',
+                              height: '3.5rem',
+                              borderRadius: '9999px',
+                              backgroundColor: '#e5e7eb',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '1.75rem',
+                              marginRight: '1rem',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {contact.avatar || '👤'}
+                          </motion.div>
+                          <div style={{ 
+                            flex: '1 1 0%',
+                            minWidth: 0,
+                            overflow: 'hidden',
+                          }}>
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center',
+                              marginBottom: '0.25rem',
+                              width: '100%',
+                            }}>
+                              <h3 style={{ 
+                                fontWeight: 600, 
+                                fontSize: '1rem',
+                                color: '#111827',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: '1 1 0%',
+                                minWidth: 0,
+                                marginRight: '0.5rem',
+                                margin: 0,
+                              }}>{contact.name}</h3>
+                              <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'flex-end',
+                                flexShrink: 0,
+                                gap: '0.25rem',
+                              }}>
+                                <span style={{ 
+                                  fontSize: '0.75rem', 
+                                  color: contact.unread > 0 ? '#10b981' : '#6b7280',
+                                  fontWeight: contact.unread > 0 ? 500 : 400,
+                                  whiteSpace: 'nowrap',
+                                }}>{contact.timestamp}</span>
+                                <motion.span
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                                  style={{
+                                    ...getStatusStyle(contact.status),
+                                    fontSize: '0.5rem',
+                                    fontWeight: 600,
+                                    padding: '0.1rem 0.25rem',
+                                    borderRadius: '0.25rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.025em',
+                                    lineHeight: 1,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {contact.status}
+                                </motion.span>
+                              </div>
+                            </div>
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center',
+                              width: '100%',
+                              overflow: 'hidden',
+                            }}>
+                              <p style={{ 
+                                fontSize: '0.875rem', 
+                                color: '#4b5563',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: '1 1 0%',
+                                minWidth: 0,
+                                marginRight: '0.5rem',
+                                margin: 0,
+                              }}>{contact.lastMessage}</p>
+                              {contact.unread > 0 && (
+                                <motion.span 
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                                  style={{
+                                    backgroundColor: '#10b981',
+                                    color: 'white',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 500,
+                                    width: '1.25rem',
+                                    height: '1.25rem',
+                                    borderRadius: '9999px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {contact.unread}
+                                </motion.span>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                    
+                    {/* Loading more indicator */}
+                    {loadingMore && (
+                      <div style={{ 
+                        padding: '1rem', 
+                        textAlign: 'center', 
+                        color: '#6b7280',
+                        fontSize: '0.875rem'
+                      }}>
+                        Loading more conversations...
+                      </div>
+                    )}
+                    
+                    {/* End of list indicator */}
+                    {!hasMorePages && filteredContacts.length > 0 && (
+                      <div style={{ 
+                        padding: '1rem', 
+                        textAlign: 'center', 
+                        color: '#9ca3af',
+                        fontSize: '0.75rem'
+                      }}>
+                        You've reached the end
+                      </div>
+                    )}
+                  </>
                 )}
-                
-                {/* Conversation list */}
-                <AnimatePresence>
-                  {filteredContacts.map((contact, index) => (
-                    <motion.div
-                      key={contact.id}
-                      variants={contactVariants}
-                      custom={index}
-                      initial="hidden"
-                      animate="visible"
-                      transition={{ delay: Math.min(index * 0.01, 0.2) }}
-                      whileHover={{ backgroundColor: selectedContact?.id === contact.id ? '#e5e7eb' : '#f5f7f9' }}
-                      onClick={() => handleContactSelect(contact)}
-                      style={{
-                        padding: '0.75rem 1rem',
-                        borderBottom: '1px solid #e5e7eb',
-                        cursor: 'pointer',
-                        backgroundColor: selectedContact?.id === contact.id ? '#f0f2f5' : 'white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        position: 'relative',
-                      }}
-                    >
+              </motion.div>
+            </motion.div>
+
+            {/* Mobile chat view */}
+            <motion.div 
+              variants={mobileViewVariants}
+              animate={mobileView}
+              style={{ 
+                position: 'absolute',
+                top: 0,
+                left: '100%',
+                width: '100%', 
+                height: '100%',
+                backgroundColor: '#f0f2f5',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                maxWidth: '100vw',
+              }}
+            >
+              {/* Mobile conversation header */}
+              {selectedContact && (
+                <>
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ 
+                      padding: '0.75rem 1rem',
+                      paddingTop: isMobile ? '5rem' : '0.75rem', // Add space for fixed menu
+                      borderBottom: '1px solid #e5e7eb',
+                      backgroundColor: '#25D366',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexShrink: 0,
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      flex: '1 1 0%',
+                      minWidth: 0,
+                      overflow: 'hidden',
+                    }}>
+                      <motion.button 
+                        whileHover="hover"
+                        whileTap="tap"
+                        variants={buttonVariants}
+                        onClick={handleBackToList}
+                        style={{
+                          backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0.75rem',
+                          borderRadius: '9999px',
+                          marginRight: '0.75rem',
+                          color: 'white',
+                          flexShrink: 0,
+                          backdropFilter: 'blur(8px)',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                        }}
+                      >
+                        <HiArrowLeft style={{ width: '1.5rem', height: '1.5rem' }} />
+                      </motion.button>
                       <motion.div 
                         whileHover={{ scale: 1.05 }}
                         style={{
-                          width: '3rem',
-                          height: '3rem',
+                          width: '2.5rem',
+                          height: '2.5rem',
+                          borderRadius: '9999px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.25rem',
+                          marginRight: '0.75rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {selectedContact.avatar || '👤'}
+                      </motion.div>
+                      <div style={{
+                        flex: '1 1 0%',
+                        minWidth: 0,
+                        overflow: 'hidden',
+                      }}>
+                        <h3 style={{ 
+                          fontWeight: 600, 
+                          fontSize: '1rem',
+                          color: 'white',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          margin: 0,
+                          marginBottom: '0.1rem',
+                        }}>{selectedContact.name}</h3>
+                        <p style={{ 
+                          fontSize: '0.75rem', 
+                          color: 'rgba(255, 255, 255, 0.8)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          margin: 0,
+                        }}>{selectedContact.phone}</p>
+                      </div>
+                    </div>
+                    <motion.button 
+                      whileHover="hover"
+                      whileTap="tap"
+                      variants={buttonVariants}
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0.5rem',
+                        borderRadius: '9999px',
+                        color: 'white',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <HiDotsVertical style={{ width: '1.25rem', height: '1.25rem' }} />
+                    </motion.button>
+                  </motion.div>
+                  
+                  {/* Mobile messages area */}
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ 
+                      flex: '1 1 auto', 
+                      overflowY: 'auto',
+                      overflowX: 'hidden',
+                      padding: '1rem',
+                      backgroundColor: '#e5ded8',
+                      backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z\' fill=\'%23dddddd\' fill-opacity=\'0.2\' fill-rule=\'evenodd\'/%3E%3C/svg%3E")',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.5rem',
+                      minHeight: 0,
+                    }}
+                  >
+                    {initialLoading ? (
+                      <div style={{ margin: 'auto', textAlign: 'center', color: '#6b7280' }}>
+                        Loading messages...
+                      </div>
+                    ) : messages.length === 0 ? (
+                      <div style={{ margin: 'auto', textAlign: 'center', color: '#6b7280' }}>
+                        No messages yet. Send your first message!
+                      </div>
+                    ) : (
+                      <AnimatePresence>
+                        {messages.map((message, index) => (
+                          <motion.div
+                            key={message.id}
+                            variants={messageVariants}
+                            custom={index}
+                            initial="hidden"
+                            animate="visible"
+                            transition={{ delay: Math.min(index * 0.02, 0.3) }}
+                            style={{
+                              alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
+                              maxWidth: '85%',
+                              backgroundColor: message.sender === 'user' ? '#dcf8c6' : 'white',
+                              padding: '0.75rem',
+                              borderRadius: '0.75rem',
+                              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                              position: 'relative',
+                              wordWrap: 'break-word',
+                              overflowWrap: 'break-word',
+                            }}
+                          >
+                            {/* Special styling for template messages */}
+                            {message.type === 'template' && (
+                              <div style={{
+                                position: 'absolute',
+                                top: '-0.75rem',
+                                left: message.sender === 'user' ? 'auto' : '0.5rem',
+                                right: message.sender === 'user' ? '0.5rem' : 'auto',
+                                fontSize: '0.65rem',
+                                backgroundColor: '#f3f4f6',
+                                padding: '0.1rem 0.3rem',
+                                borderRadius: '0.25rem',
+                                color: '#6b7280',
+                              }}>
+                                Template
+                              </div>
+                            )}
+                            <p style={{ 
+                              margin: 0, 
+                              marginBottom: '0.25rem', 
+                              color: '#333333',
+                              wordWrap: 'break-word',
+                              overflowWrap: 'break-word',
+                            }}>{message.text}</p>
+                            <span style={{ 
+                              fontSize: '0.7rem', 
+                              color: '#6b7280',
+                              float: 'right',
+                              marginLeft: '0.5rem',
+                              marginTop: '0.25rem',
+                            }}>
+                              {message.timestamp}
+                            </span>
+                          </motion.div>
+                        ))}
+                        {/* Add element to scroll to */}
+                        <div ref={messageEndRef} style={{ height: '1px', width: '100%' }} />
+                      </AnimatePresence>
+                    )}
+                  </motion.div>
+                  
+                  {/* Mobile message input area */}
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ 
+                      padding: '0.75rem 1rem',
+                      backgroundColor: 'white',
+                      borderTop: '1px solid #e5e7eb',
+                      marginTop: 'auto',
+                      flexShrink: 0,
+                      width: '100%',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <form 
+                      onSubmit={handleSendMessage} 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.5rem',
+                        width: '100%',
+                      }}
+                    >
+                      <motion.button 
+                        type="button" 
+                        whileHover="hover"
+                        whileTap="tap"
+                        variants={buttonVariants}
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <HiOutlineEmojiHappy style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
+                      </motion.button>
+                      <motion.button 
+                        type="button" 
+                        whileHover="hover"
+                        whileTap="tap"
+                        variants={buttonVariants}
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <HiOutlinePaperClip style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
+                      </motion.button>
+                      <motion.input
+                        whileFocus={{ boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.2)" }}
+                        type="text"
+                        placeholder={sendingMessage ? "Sending..." : "Type a message"}
+                        value={messageInput}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessageInput(e.target.value)}
+                        disabled={sendingMessage}
+                        style={{
+                          flex: '1 1 0%',
+                          backgroundColor: '#f0f2f5',
+                          border: 'none',
+                          outline: 'none',
+                          borderRadius: '1.25rem',
+                          padding: '0.75rem 1rem',
+                          fontSize: '0.9375rem',
+                          opacity: sendingMessage ? 0.8 : 1,
+                        }}
+                      />
+                      <motion.button 
+                        type={messageInput.trim() && !sendingMessage ? 'submit' : 'button'} 
+                        whileHover="hover"
+                        whileTap="tap"
+                        variants={buttonVariants}
+                        disabled={sendingMessage}
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: sendingMessage ? 'wait' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: sendingMessage ? 0.7 : 1,
+                        }}
+                      >
+                        {messageInput.trim() ? (
+                          <HiOutlinePaperAirplane style={{ 
+                            color: sendingMessage ? '#84c7ab' : '#10b981', 
+                            width: '1.5rem', 
+                            height: '1.5rem',
+                            transform: 'rotate(90deg)'
+                          }} />
+                        ) : (
+                          <HiOutlineMicrophone style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
+                        )}
+                      </motion.button>
+                    </form>
+                  </motion.div>
+                </>
+              )}
+            </motion.div>
+          </div>
+        ) : (
+          /* Desktop layout - existing side-by-side layout */
+          <>
+            {/* Contacts list - Left side */}
+            <motion.div 
+              variants={panelVariants}
+              style={{ 
+                width: '350px', 
+                borderRight: '1px solid #e5e7eb',
+                display: 'flex',
+                flexDirection: 'column',
+                backgroundColor: 'white',
+                flexShrink: 0,
+              }}
+            >
+              {/* Header with search */}
+              <div style={{ 
+                padding: '0.75rem 1rem',
+                borderBottom: '1px solid #e5e7eb',
+              }}>
+                <motion.div 
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    backgroundColor: '#f0f2f5',
+                    borderRadius: '0.5rem',
+                    padding: '0.5rem 0.75rem',
+                  }}
+                >
+                  <HiOutlineSearch style={{ color: '#6b7280', width: '1.25rem', height: '1.25rem' }} />
+                  <input
+                    type="text"
+                    placeholder="Search or start a new chat"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      width: '100%',
+                      marginLeft: '0.5rem',
+                      fontSize: '0.875rem',
+                    }}
+                  />
+                </motion.div>
+              </div>
+              
+              {/* Contacts list */}
+              <motion.div 
+                ref={contactsListRef}
+                style={{ 
+                  flex: '1 1 0%', 
+                  overflowY: 'auto',
+                  position: 'relative',
+                }}
+              >
+                {initialLoading && filteredContacts.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+                    Loading conversations...
+                  </div>
+                ) : filteredContacts.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+                    No conversations found
+                  </div>
+                ) : (
+                  <>
+                    {/* Refreshing indicator */}
+                    {refreshing && (
+                      <div style={{ 
+                        position: 'absolute', 
+                        top: '0.5rem', 
+                        right: '0.5rem',
+                        backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                        color: 'white',
+                        fontSize: '0.75rem',
+                        fontWeight: 500,
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '9999px',
+                        zIndex: 10,
+                      }}>
+                        Updating...
+                      </div>
+                    )}
+                    
+                    {/* Conversation list */}
+                    <AnimatePresence>
+                      {filteredContacts.map((contact, index) => (
+                        <motion.div
+                          key={contact.id}
+                          variants={contactVariants}
+                          custom={index}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: Math.min(index * 0.01, 0.2) }}
+                          whileHover={{ backgroundColor: selectedContact?.id === contact.id ? '#e5e7eb' : '#f5f7f9' }}
+                          onClick={() => handleContactSelect(contact)}
+                          style={{
+                            padding: '0.75rem 1rem',
+                            borderBottom: '1px solid #e5e7eb',
+                            cursor: 'pointer',
+                            backgroundColor: selectedContact?.id === contact.id ? '#f0f2f5' : 'white',
+                            display: 'flex',
+                            alignItems: 'center',
+                            position: 'relative',
+                          }}
+                        >
+                          <motion.div 
+                            whileHover={{ scale: 1.05 }}
+                            style={{
+                              width: '3rem',
+                              height: '3rem',
+                              borderRadius: '9999px',
+                              backgroundColor: '#e5e7eb',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '1.5rem',
+                              marginRight: '0.75rem',
+                            }}
+                          >
+                            {contact.avatar || '👤'}
+                          </motion.div>
+                          <div style={{ flex: '1 1 0%' }}>
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center' 
+                            }}>
+                              <h3 style={{ 
+                                fontWeight: 500, 
+                                fontSize: '0.9375rem',
+                                color: '#111827',
+                                flex: '1 1 0%',
+                              }}>{contact.name}</h3>
+                              {/* Status tag and timestamp stacked vertically */}
+                              <div style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column',
+                                alignItems: 'flex-end', 
+                                gap: '0.25rem',
+                                flexShrink: 0,
+                              }}>
+                                <motion.span
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                                  style={{
+                                    ...getStatusStyle(contact.status),
+                                    fontSize: '0.5rem',
+                                    fontWeight: 600,
+                                    padding: '0.1rem 0.25rem',
+                                    borderRadius: '0.25rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.025em',
+                                    lineHeight: 1,
+                                  }}
+                                >
+                                  {contact.status}
+                                </motion.span>
+                                <span style={{ 
+                                  fontSize: '0.75rem', 
+                                  color: contact.unread > 0 ? '#10b981' : '#6b7280',
+                                  fontWeight: contact.unread > 0 ? 500 : 400,
+                                  whiteSpace: 'nowrap',
+                                }}>{contact.timestamp}</span>
+                              </div>
+                            </div>
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center',
+                            }}>
+                              <p style={{ 
+                                fontSize: '0.875rem', 
+                                color: '#4b5563',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                maxWidth: '13rem',
+                              }}>{contact.lastMessage}</p>
+                              {contact.unread > 0 && (
+                                <motion.span 
+                                  initial={{ scale: 0 }}
+                                  animate={{ scale: 1 }}
+                                  transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                                  style={{
+                                    backgroundColor: '#10b981',
+                                    color: 'white',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 500,
+                                    width: '1.25rem',
+                                    height: '1.25rem',
+                                    borderRadius: '9999px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  {contact.unread}
+                                </motion.span>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                    
+                    {/* Loading more indicator */}
+                    {loadingMore && (
+                      <div style={{ 
+                        padding: '1rem', 
+                        textAlign: 'center', 
+                        color: '#6b7280',
+                        fontSize: '0.875rem'
+                      }}>
+                        Loading more conversations...
+                      </div>
+                    )}
+                    
+                    {/* End of list indicator */}
+                    {!hasMorePages && filteredContacts.length > 0 && (
+                      <div style={{ 
+                        padding: '1rem', 
+                        textAlign: 'center', 
+                        color: '#9ca3af',
+                        fontSize: '0.75rem'
+                      }}>
+                        You've reached the end
+                      </div>
+                    )}
+                  </>
+                )}
+              </motion.div>
+            </motion.div>
+            
+            {/* Conversation - Right side */}
+            <motion.div 
+              variants={panelVariants}
+              style={{ 
+                flex: '1 1 auto', 
+                display: 'flex',
+                flexDirection: 'column',
+                backgroundColor: '#f0f2f5',
+                minWidth: 0,
+                maxHeight: '100%',
+              }}
+            >
+              {/* Conversation header */}
+              {selectedContact ? (
+                <>
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ 
+                      padding: '0.75rem 1rem',
+                      borderBottom: '1px solid #e5e7eb',
+                      backgroundColor: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <motion.div 
+                        whileHover={{ scale: 1.05 }}
+                        style={{
+                          width: '2.5rem',
+                          height: '2.5rem',
                           borderRadius: '9999px',
                           backgroundColor: '#e5e7eb',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          fontSize: '1.5rem',
+                          fontSize: '1.25rem',
                           marginRight: '0.75rem',
                         }}
                       >
-                        {contact.avatar || '👤'}
+                        {selectedContact.avatar || '👤'}
                       </motion.div>
-                      <div style={{ flex: '1 1 0%' }}>
-                        <div style={{ 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center' 
-                        }}>
-                          <h3 style={{ 
-                            fontWeight: 500, 
-                            fontSize: '0.9375rem',
-                            color: '#111827',
-                            flex: '1 1 0%',
-                          }}>{contact.name}</h3>
-                          {/* Status tag and timestamp stacked vertically */}
-                          <div style={{ 
-                            display: 'flex', 
-                            flexDirection: 'column',
-                            alignItems: 'flex-end', 
-                            gap: '0.25rem',
-                            flexShrink: 0,
-                          }}>
-                            <motion.span
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                              style={{
-                                ...getStatusStyle(contact.status),
-                                fontSize: '0.5rem',
-                                fontWeight: 600,
-                                padding: '0.1rem 0.25rem',
-                                borderRadius: '0.25rem',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.025em',
-                                lineHeight: 1,
-                              }}
-                            >
-                              {contact.status}
-                            </motion.span>
-                            <span style={{ 
-                              fontSize: '0.75rem', 
-                              color: contact.unread > 0 ? '#10b981' : '#6b7280',
-                              fontWeight: contact.unread > 0 ? 500 : 400,
-                              whiteSpace: 'nowrap',
-                            }}>{contact.timestamp}</span>
-                          </div>
-                        </div>
-                        <div style={{ 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center',
-                        }}>
-                          <p style={{ 
-                            fontSize: '0.875rem', 
-                            color: '#4b5563',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            maxWidth: '13rem',
-                          }}>{contact.lastMessage}</p>
-                          {contact.unread > 0 && (
-                            <motion.span 
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                              style={{
-                                backgroundColor: '#10b981',
-                                color: 'white',
-                                fontSize: '0.75rem',
-                                fontWeight: 500,
-                                width: '1.25rem',
-                                height: '1.25rem',
-                                borderRadius: '9999px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              {contact.unread}
-                            </motion.span>
-                          )}
-                        </div>
+                      <div>
+                        <h3 style={{ 
+                          fontWeight: 600, 
+                          fontSize: '1rem',
+                          color: '#111827',
+                        }}>{selectedContact.name}</h3>
+                        <p style={{ 
+                          fontSize: '0.75rem', 
+                          color: '#6b7280',
+                        }}>{selectedContact.phone}</p>
                       </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-                
-                {/* Loading more indicator */}
-                {loadingMore && (
-                  <div style={{ 
-                    padding: '1rem', 
-                    textAlign: 'center', 
-                    color: '#6b7280',
-                    fontSize: '0.875rem'
-                  }}>
-                    Loading more conversations...
-                  </div>
-                )}
-                
-                {/* End of list indicator */}
-                {!hasMorePages && filteredContacts.length > 0 && (
-                  <div style={{ 
-                    padding: '1rem', 
-                    textAlign: 'center', 
-                    color: '#9ca3af',
-                    fontSize: '0.75rem'
-                  }}>
-                    You've reached the end
-                  </div>
-                )}
-              </>
-            )}
-          </motion.div>
-        </motion.div>
-        
-        {/* Conversation - Right side */}
-        <motion.div 
-          variants={panelVariants}
-          style={{ 
-            flex: '1 1 auto', 
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: '#f0f2f5',
-            minWidth: 0,
-            maxHeight: '100%',
-          }}
-        >
-          {/* Conversation header */}
-          {selectedContact ? (
-            <>
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2 }}
-                style={{ 
-                  padding: '0.75rem 1rem',
-                  borderBottom: '1px solid #e5e7eb',
-                  backgroundColor: 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    </div>
+                    <motion.button 
+                      whileHover="hover"
+                      whileTap="tap"
+                      variants={buttonVariants}
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0.5rem',
+                        borderRadius: '9999px',
+                      }}
+                    >
+                      <HiDotsVertical style={{ width: '1.25rem', height: '1.25rem' }} />
+                    </motion.button>
+                  </motion.div>
+                  
+                  {/* Messages area */}
                   <motion.div 
-                    whileHover={{ scale: 1.05 }}
-                    style={{
-                      width: '2.5rem',
-                      height: '2.5rem',
-                      borderRadius: '9999px',
-                      backgroundColor: '#e5e7eb',
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ 
+                      flex: '1 1 auto', 
+                      overflowY: 'auto',
+                      padding: '1rem',
+                      backgroundColor: '#e5ded8',
+                      backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z\' fill=\'%23dddddd\' fill-opacity=\'0.2\' fill-rule=\'evenodd\'/%3E%3C/svg%3E")',
                       display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '1.25rem',
-                      marginRight: '0.75rem',
+                      flexDirection: 'column',
+                      gap: '0.5rem',
+                      minHeight: 0,
                     }}
                   >
-                    {selectedContact.avatar || '👤'}
+                    {initialLoading ? (
+                      <div style={{ margin: 'auto', textAlign: 'center', color: '#6b7280' }}>
+                        Loading messages...
+                      </div>
+                    ) : messages.length === 0 ? (
+                      <div style={{ margin: 'auto', textAlign: 'center', color: '#6b7280' }}>
+                        No messages yet. Send your first message!
+                      </div>
+                    ) : (
+                      <AnimatePresence>
+                        {messages.map((message, index) => (
+                          <motion.div
+                            key={message.id}
+                            variants={messageVariants}
+                            custom={index}
+                            initial="hidden"
+                            animate="visible"
+                            transition={{ delay: Math.min(index * 0.02, 0.3) }}
+                            style={{
+                              alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
+                              maxWidth: '70%',
+                              backgroundColor: message.sender === 'user' ? '#dcf8c6' : 'white',
+                              padding: '0.5rem 0.75rem',
+                              borderRadius: '0.5rem',
+                              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                              position: 'relative',
+                            }}
+                          >
+                            {/* Special styling for template messages */}
+                            {message.type === 'template' && (
+                              <div style={{
+                                position: 'absolute',
+                                top: '-0.75rem',
+                                left: message.sender === 'user' ? 'auto' : '0.5rem',
+                                right: message.sender === 'user' ? '0.5rem' : 'auto',
+                                fontSize: '0.65rem',
+                                backgroundColor: '#f3f4f6',
+                                padding: '0.1rem 0.3rem',
+                                borderRadius: '0.25rem',
+                                color: '#6b7280',
+                              }}>
+                                Template
+                              </div>
+                            )}
+                            <p style={{ 
+                              margin: 0, 
+                              marginBottom: '0.25rem', 
+                              color: '#333333',
+                              wordWrap: 'break-word',
+                              overflowWrap: 'break-word',
+                            }}>{message.text}</p>
+                            <span style={{ 
+                              fontSize: '0.7rem', 
+                              color: '#6b7280',
+                              float: 'right',
+                              marginLeft: '0.5rem',
+                              marginTop: '0.25rem',
+                            }}>
+                              {message.timestamp}
+                            </span>
+                          </motion.div>
+                        ))}
+                        {/* Add element to scroll to */}
+                        <div ref={messageEndRef} style={{ height: '1px', width: '100%' }} />
+                      </AnimatePresence>
+                    )}
                   </motion.div>
-                  <div>
-                    <h3 style={{ 
-                      fontWeight: 600, 
-                      fontSize: '1rem',
-                      color: '#111827',
-                    }}>{selectedContact.name}</h3>
-                    <p style={{ 
-                      fontSize: '0.75rem', 
-                      color: '#6b7280',
-                    }}>{selectedContact.phone}</p>
-                  </div>
-                </div>
-                <motion.button 
-                  whileHover="hover"
-                  whileTap="tap"
-                  variants={buttonVariants}
-                  style={{
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0.5rem',
-                    borderRadius: '9999px',
-                  }}
-                >
-                  <HiDotsVertical style={{ color: '#6b7280', width: '1.25rem', height: '1.25rem' }} />
-                </motion.button>
-              </motion.div>
-              
-              {/* Messages area */}
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.2 }}
-                style={{ 
-                  flex: '1 1 auto', 
-                  overflowY: 'auto',
-                  padding: '1rem',
-                  backgroundColor: '#e5ded8',
-                  backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z\' fill=\'%23dddddd\' fill-opacity=\'0.2\' fill-rule=\'evenodd\'/%3E%3C/svg%3E")',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem',
-                  minHeight: 0,
-                }}
-              >
-                {initialLoading ? (
-                  <div style={{ margin: 'auto', textAlign: 'center', color: '#6b7280' }}>
-                    Loading messages...
-                  </div>
-                ) : messages.length === 0 ? (
-                  <div style={{ margin: 'auto', textAlign: 'center', color: '#6b7280' }}>
-                    No messages yet. Send your first message!
-                  </div>
-                ) : (
-                  <AnimatePresence>
-                    {messages.map((message, index) => (
-                      <motion.div
-                        key={message.id}
-                        variants={messageVariants}
-                        custom={index}
-                        initial="hidden"
-                        animate="visible"
-                        transition={{ delay: Math.min(index * 0.02, 0.3) }}
+                  
+                  {/* Message input area */}
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ 
+                      padding: '0.75rem 1rem',
+                      backgroundColor: 'white',
+                      borderTop: '1px solid #e5e7eb',
+                      marginTop: 'auto',
+                    }}
+                  >
+                    <form 
+                      onSubmit={handleSendMessage} 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.5rem' 
+                      }}
+                    >
+                      <motion.button 
+                        type="button" 
+                        whileHover="hover"
+                        whileTap="tap"
+                        variants={buttonVariants}
                         style={{
-                          alignSelf: message.sender === 'user' ? 'flex-end' : 'flex-start',
-                          maxWidth: '70%',
-                          backgroundColor: message.sender === 'user' ? '#dcf8c6' : 'white',
-                          padding: '0.5rem 0.75rem',
-                          borderRadius: '0.5rem',
-                          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
-                          position: 'relative',
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                         }}
                       >
-                        {/* Special styling for template messages */}
-                        {message.type === 'template' && (
-                          <div style={{
-                            position: 'absolute',
-                            top: '-0.75rem',
-                            left: message.sender === 'user' ? 'auto' : '0.5rem',
-                            right: message.sender === 'user' ? '0.5rem' : 'auto',
-                            fontSize: '0.65rem',
-                            backgroundColor: '#f3f4f6',
-                            padding: '0.1rem 0.3rem',
-                            borderRadius: '0.25rem',
-                            color: '#6b7280',
-                          }}>
-                            Template
-                          </div>
+                        <HiOutlineEmojiHappy style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
+                      </motion.button>
+                      <motion.button 
+                        type="button" 
+                        whileHover="hover"
+                        whileTap="tap"
+                        variants={buttonVariants}
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <HiOutlinePaperClip style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
+                      </motion.button>
+                      <motion.input
+                        whileFocus={{ boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.2)" }}
+                        type="text"
+                        placeholder={sendingMessage ? "Sending..." : "Type a message"}
+                        value={messageInput}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessageInput(e.target.value)}
+                        disabled={sendingMessage}
+                        style={{
+                          flex: '1 1 0%',
+                          backgroundColor: '#f0f2f5',
+                          border: 'none',
+                          outline: 'none',
+                          borderRadius: '1.25rem',
+                          padding: '0.75rem 1rem',
+                          fontSize: '0.9375rem',
+                          opacity: sendingMessage ? 0.8 : 1,
+                        }}
+                      />
+                      <motion.button 
+                        type={messageInput.trim() && !sendingMessage ? 'submit' : 'button'} 
+                        whileHover="hover"
+                        whileTap="tap"
+                        variants={buttonVariants}
+                        disabled={sendingMessage}
+                        style={{
+                          backgroundColor: 'transparent',
+                          border: 'none',
+                          cursor: sendingMessage ? 'wait' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: sendingMessage ? 0.7 : 1,
+                        }}
+                      >
+                        {messageInput.trim() ? (
+                          <HiOutlinePaperAirplane style={{ 
+                            color: sendingMessage ? '#84c7ab' : '#10b981', 
+                            width: '1.5rem', 
+                            height: '1.5rem',
+                            transform: 'rotate(90deg)'
+                          }} />
+                        ) : (
+                          <HiOutlineMicrophone style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
                         )}
-                        <p style={{ margin: 0, marginBottom: '0.25rem', color: '#333333' }}>{message.text}</p>
-                        <span style={{ 
-                          fontSize: '0.7rem', 
-                          color: '#6b7280',
-                          float: 'right',
-                          marginLeft: '0.5rem',
-                          marginTop: '0.25rem',
-                        }}>
-                          {message.timestamp}
-                        </span>
-                      </motion.div>
-                    ))}
-                    {/* Add element to scroll to */}
-                    <div ref={messageEndRef} style={{ height: '1px', width: '100%' }} />
-                  </AnimatePresence>
-                )}
-              </motion.div>
-              
-              {/* Message input area */}
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2 }}
-                style={{ 
-                  padding: '0.75rem 1rem',
-                  backgroundColor: 'white',
-                  borderTop: '1px solid #e5e7eb',
-                  marginTop: 'auto',
-                }}
-              >
-                <form 
-                  onSubmit={handleSendMessage} 
-                  style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '0.5rem' 
-                  }}
-                >
-                  <motion.button 
-                    type="button" 
-                    whileHover="hover"
-                    whileTap="tap"
-                    variants={buttonVariants}
-                    style={{
-                      backgroundColor: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <HiOutlineEmojiHappy style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
-                  </motion.button>
-                  <motion.button 
-                    type="button" 
-                    whileHover="hover"
-                    whileTap="tap"
-                    variants={buttonVariants}
-                    style={{
-                      backgroundColor: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <HiOutlinePaperClip style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
-                  </motion.button>
-                  <motion.input
-                    whileFocus={{ boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.2)" }}
-                    type="text"
-                    placeholder={sendingMessage ? "Sending..." : "Type a message"}
-                    value={messageInput}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMessageInput(e.target.value)}
-                    disabled={sendingMessage}
-                    style={{
-                      flex: '1 1 0%',
-                      backgroundColor: '#f0f2f5',
-                      border: 'none',
-                      outline: 'none',
-                      borderRadius: '1.25rem',
-                      padding: '0.75rem 1rem',
-                      fontSize: '0.9375rem',
-                      opacity: sendingMessage ? 0.8 : 1,
-                    }}
-                  />
-                  <motion.button 
-                    type={messageInput.trim() && !sendingMessage ? 'submit' : 'button'} 
-                    whileHover="hover"
-                    whileTap="tap"
-                    variants={buttonVariants}
-                    disabled={sendingMessage}
-                    style={{
-                      backgroundColor: 'transparent',
-                      border: 'none',
-                      cursor: sendingMessage ? 'wait' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      opacity: sendingMessage ? 0.7 : 1,
-                    }}
-                  >
-                    {messageInput.trim() ? (
-                      <HiOutlinePaperAirplane style={{ 
-                        color: sendingMessage ? '#84c7ab' : '#10b981', 
-                        width: '1.5rem', 
-                        height: '1.5rem',
-                        transform: 'rotate(90deg)'
-                      }} />
-                    ) : (
-                      <HiOutlineMicrophone style={{ color: '#6b7280', width: '1.5rem', height: '1.5rem' }} />
-                    )}
-                  </motion.button>
-                </form>
-              </motion.div>
-            </>
-          ) : (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              height: '100%',
-              backgroundColor: '#f9fafb',
-              flexDirection: 'column',
-              color: '#6b7280',
-            }}>
-              <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>💬</div>
-              <h2 style={{ fontWeight: 500, marginBottom: '0.5rem' }}>WhatsApp Conversations</h2>
-              <p>Select a conversation or search for a contact</p>
-            </div>
-          )}
-        </motion.div>
+                      </motion.button>
+                    </form>
+                  </motion.div>
+                </>
+              ) : (
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  height: '100%',
+                  backgroundColor: '#f9fafb',
+                  flexDirection: 'column',
+                  color: '#6b7280',
+                }}>
+                  <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>💬</div>
+                  <h2 style={{ fontWeight: 500, marginBottom: '0.5rem' }}>WhatsApp Conversations</h2>
+                  <p>Select a conversation or search for a contact</p>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
       </motion.div>
     </DashboardLayout>
   );
